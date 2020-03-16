@@ -241,7 +241,7 @@
           type: "application/json",
         })
         a.href = URL.createObjectURL(file)
-        a.download = "ndt" + (viewIsNDT5 ? "5-" : "7-") + (viewUseLocate() ? "uselocate-" : "nolocate-") + measurementID + ".json"
+        a.download = "ndt" + (viewIsNDT5() ? "5-" : "7-") + (viewUseLocate() ? "uselocate-" : "nolocate-") + measurementID + ".json"
         a.click()
       })
     </script>
