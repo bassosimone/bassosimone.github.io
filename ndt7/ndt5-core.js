@@ -65,19 +65,13 @@ const ndt5core = (function () {
     if (config === undefined || config.userAcceptedDataPolicy !== true) {
       throw "fatal: user must accept data policy first"
     }
-    if (config.baseURL === undefined && config.locate === undefined) {
-      throw "fatal: one of baseURL and locate must be specified"
-    }
-    let locate = config.locate
-    if (config.baseURL !== undefined) {
-      locate = function (callback) {
-        callback(config.baseURL)
-      }
+    if (config.locate === undefined) {
+      throw "fatal: locate must be specified"
     }
     if (config.onstarting !== undefined) {
       config.onstarting()
     }
-    locate(function (url) {
+    config.locate(function (url) {
       config.onserverurl(url)
       startWorker(config, url)
     })

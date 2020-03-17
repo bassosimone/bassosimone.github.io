@@ -77,7 +77,6 @@ const ndt7core = (function () {
   // start starts the ndt7 test suite. The config object structure is:
   //
   //     {
-  //       baseURL: "<url>",
   //       locate: function (callback) {},
   //       oncomplete: function () {},
   //       onstarting: function () {},
@@ -89,13 +88,8 @@ const ndt7core = (function () {
   //
   // where
   //
-  // - `baseURL` (`string`) is the HTTP/HTTPS URL of the server. We will use
-  //   WS when the scheme is HTTP; WSS when it is HTTPS. One of `baseURL` and
-  //   `locate` must be specified, otherwise this function throws.
-  //
   // - `locate` (`function(function(err, url))`) is the function that finds
-  //   out the server with which to run the ndt7 test suite. One of `baseURL` and
-  //   `locate` must be specified, otherwise this function throws.
+  //   out the server with which to run the ndt7 test suite.
   //
   // - `oncomplete` (`function(testSpec)`) is the optional callback called
   //   when the whole test suite has finished.
@@ -131,19 +125,13 @@ const ndt7core = (function () {
     if (config === undefined || config.userAcceptedDataPolicy !== true) {
       throw "fatal: user must accept data policy first"
     }
-    if (config.baseURL === undefined && config.locate === undefined) {
-      throw "fatal: one of baseURL and locate must be specified"
-    }
-    let locate = config.locate
-    if (config.baseURL !== undefined) {
-      locate = function (callback) {
-        callback(config.baseURL)
-      }
+    if (config.locate === undefined) {
+      throw "fatal: locate must be specified"
     }
     if (config.onstarting !== undefined) {
       config.onstarting()
     }
-    locate(function (url) {
+    config.locate(function (url) {
       config.onserverurl(url)
       startTest(config, url, "download", function () {
         startTest(config, url, "upload", config.oncomplete)
