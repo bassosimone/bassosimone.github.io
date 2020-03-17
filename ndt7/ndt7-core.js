@@ -2,6 +2,100 @@
 const ndt7core = (function () {
   "use strict"
 
+  // download implement the download Web Worker.
+  function download(ev, WebSocket, postMessage) {
+    let url = new URL(ev.data.baseURL)
+    url.protocol = (url.protocol === "https:") ? "wss:" : "ws:"
+    url.pathname = "/ndt/v7/download"
+    const sock = new WebSocket(url.toString(), "net.measurementlab.ndt.v7")
+    sock.onclose = function () {
+      postMessage(null)
+    }
+    sock.onopen = function () {
+      const start = new Date().getTime()
+      let previous = start
+      let total = 0
+      sock.onmessage = function (ev) {
+        total += (ev.data instanceof Blob) ? ev.data.size : ev.data.length
+        let now = new Date().getTime()
+        const every = 250  // ms
+        if (now - previous > every) {
+          postMessage({
+            "AppInfo": {
+              "ElapsedTime": (now - start) * 1000,  // us
+              "NumBytes": total,
+            },
+            "Origin": "client",
+            "Test": "download",
+          })
+          previous = now
+        }
+        if (!(ev.data instanceof Blob)) {
+          let m = JSON.parse(ev.data)
+          m.Origin = "server"
+          m.Test = "download"
+          postMessage(m)
+        }
+      }
+    }
+  }
+
+  // upload implements the upload WebWorker.
+  function upload(ev, WebSocket, postMessage) {
+    let url = new URL(ev.data.baseURL)
+    url.protocol = (url.protocol === "https:") ? "wss:" : "ws:"
+    const wsproto = "net.measurementlab.ndt.v7"
+    url.pathname = "/ndt/v7/upload"
+    const sock = new WebSocket(url.toString(), wsproto)
+    let closed = false
+    sock.onclose = function () {
+      closed = true
+      postMessage(null)
+    }
+    function uploader(socket, data, start, previous, total) {
+      if (closed) {
+        return // socket.send() with too much buffering causes socket.close()
+      }
+      let now = new Date().getTime()
+      const duration = 10000  // millisecond
+      if (now - start > duration) {
+        sock.close()
+        return
+      }
+      const maxMessageSize = 16777216 /* = (1<<24) = 16MB */
+      if (data.length < maxMessageSize && data.length < (total - sock.bufferedAmount) / 16) {
+        data = new Uint8Array(data.length * 2) // TODO(bassosimone): fill this message
+      }
+      const underbuffered = 7 * data.length
+      if (sock.bufferedAmount < underbuffered) {
+        sock.send(data)
+        total += data.length
+      }
+      const every = 250  // millisecond
+      if (now - previous > every) {
+        postMessage({
+          "AppInfo": {
+            "ElapsedTime": (now - start) * 1000,  // us
+            "NumBytes": (total - sock.bufferedAmount),
+          },
+          "Origin": "client",
+          "Test": "upload",
+        })
+        previous = now
+      }
+      setTimeout(
+        function () { uploader(sock, data, start, previous, total) },
+        0)
+    }
+    sock.onopen = function () {
+      const initialMessageSize = 8192 /* (1<<13) */
+      const data = new Uint8Array(initialMessageSize) // TODO(bassosimone): fill this message
+      sock.binarytype = "arraybuffer"
+      const start = new Date().getTime()
+      uploader(sock, data, start, start, 0)
+    }
+  }
+
   function startWorker(config) {
     if (config.testName !== "download" && config.testName !== "upload") {
       throw "fatal: testName is neither download nor upload"
@@ -17,7 +111,7 @@ const ndt7core = (function () {
     }
     const start = new Date().getTime()
     let done = false
-    let worker = new Worker("ndt7-" + config.testName + ".js")
+    let worker = config.newWorker("ndt7-" + config.testName + ".js")
     function finish(error) {
       if (!done) {
         done = true
@@ -61,6 +155,7 @@ const ndt7core = (function () {
   function startTest(config, url, testName, callback) {
     startWorker({
       baseURL: url,
+      newWorker: config.newWorker,
       onteststarting: config.onteststarting,
       ontestmeasurement: config.ontestmeasurement,
       ontestcomplete: function (ev) {
@@ -131,6 +226,11 @@ const ndt7core = (function () {
     if (config.onstarting !== undefined) {
       config.onstarting()
     }
+    if (config.newWorker === undefined) {
+      config.newWorker = function (filepath) {
+        return new Worker(filepath)
+      }
+    }
     config.locate(function (url) {
       config.onserverurl(url)
       startTest(config, url, "download", function () {
@@ -140,6 +240,13 @@ const ndt7core = (function () {
   }
 
   return {
+    download: download,
     start: start,
+    upload: upload,
   }
 })()
+if (typeof exports !== "undefined") {
+  exports.download = ndt7core.download
+  exports.start = ndt7core.start
+  exports.upload = ndt7core.upload
+}
