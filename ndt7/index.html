@@ -200,12 +200,11 @@
       }
 
       document.getElementById("run").addEventListener("click", function () {
-        const locator = ndt7locate.newInstance({
-          mockedResult: viewGetBaseURL(),
-        })
         let measurement = ndt7extra.newMeasurement((viewIsNDT5()) ? "ndt5" : "ndt7")
         const config = {
-          locate: locator.locate,
+          locate: ndt7locate.newInstance({
+            mockedResult: viewGetBaseURL(),
+          }).locate,
           oncomplete: function () {
             viewOnComplete()
             currentMeasurement = measurement.end()
