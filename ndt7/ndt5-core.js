@@ -2,29 +2,6 @@
 const ndt5core = (function () {
   "use strict"
 
-  function locate(config) {
-    if (config === undefined || config.userAcceptedDataPolicy !== true) {
-      throw "fatal: user must accept data policy first"
-    }
-    if (config.mockedResult !== undefined && config.mockedResult !== "") {
-      config.callback(config.mockedResult)
-      return
-    }
-    if (config.url === undefined || config.url === "") {
-      config.url = "https://locate.measurementlab.net/ndt_ssl"
-    }
-    fetch(config.url)
-      .then(function (response) {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json()
-      })
-      .then(function (doc) {
-        config.callback("https://" + doc.fqdn + "/")
-      })
-  }
-
   function startWorker(config, url) {
     let worker = new Worker("ndt-wrapper-ww.js")
     worker.onmessage = function (ev) {
@@ -82,53 +59,27 @@ const ndt5core = (function () {
     })
   }
 
-  // start starts the ndt5 test suite. The config object structure is:
-  //
-  //     {
-  //       baseURL: "",
-  //       oncomplete: function() {},
-  //       onstarting: function() {},
-  //       ontestcomplete: function (testSpec) {},
-  //       ontestmeasurement: function (measurement) {},
-  //       onteststarting: function (testSpec) {},
-  //       userAcceptedDataPolicy: true
-  //     }
-  //
-  // where
-  //
-  // - `baseURL` (`string`) is the optional http/https URL of the server (we
-  //   will locate a suitable server if this is missing);
-  //
-  // - `oncomplete` (`function(testSpec)`) is the optional callback called
-  //   when the whole test suite has finished;
-  //
-  // - `onstarting` is like `oncomplete` but called at startup;
-  //
-  // - `onserverurl` (`function(string)`) is called when we have located
-  //   the server URL, or immediately if you provided a baseURL;
-  //
-  // - `ontestcomplete` is exactly like the `ontestcomplete` field passed
-  //   to the `startWorker` function (see above);
-  //
-  // - `ontestmeasurement` is exactly like the `ontestmeasurement` field passed
-  //   to the `startWorker` function (see above);
-  //
-  // - `onteststarting` is exactly like the `onteststarting` field passed
-  //   to the `startWorker` function (see above);
-  //
-  // - `userAcceptedDataPolicy` MUST be present and set to true otherwise
-  //   this function will immediately throw an exception.
+  // start starts the ndt5 test suite. Its interface is exactly like
+  // ndt7core.start except that here we run ndt5.
   function start(config) {
+    if (config === undefined || config.userAcceptedDataPolicy !== true) {
+      throw "fatal: user must accept data policy first"
+    }
+    if (config.baseURL === undefined && config.locate === undefined) {
+      throw "fatal: one of baseURL and locate must be specified"
+    }
+    let locate = config.locate
+    if (config.baseURL !== undefined) {
+      locate = function (callback) {
+        callback(config.baseURL)
+      }
+    }
     if (config.onstarting !== undefined) {
       config.onstarting()
     }
-    locate({
-      callback: function (url) {
-        config.onserverurl(url)
-        startWorker(config, url)
-      },
-      mockedResult: config.baseURL,
-      userAcceptedDataPolicy: config.userAcceptedDataPolicy,
+    locate(function (url) {
+      config.onserverurl(url)
+      startWorker(config, url)
     })
   }
 

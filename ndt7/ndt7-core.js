@@ -2,94 +2,7 @@
 const ndt7core = (function () {
   "use strict"
 
-  // locate locates the closest server. The config object structure is:
-  //
-  //     {
-  //       callback: function(url) {},
-  //       mockedResult: "",
-  //       url: "",
-  //       userAcceptedDataPolicy: true
-  //     }
-  //
-  // where:
-  //
-  // - `callback` (`function(url)`) is the mandatory callback called on
-  //   success with the stringified URL of the located server as argument;
-  //
-  // - `mockedResult` (`string`) optionally allows you to skip the real
-  //   location lookup and immediately callback with the provided string;
-  //
-  // - `url` (`string`) is the optional locate service URL;
-  //
-  // - `userAcceptedDataPolicy` MUST be present and set to true otherwise
-  //   this function will throw an exception.
-  function locate(config) {
-    if (config === undefined || config.userAcceptedDataPolicy !== true) {
-      throw "fatal: user must accept data policy first"
-    }
-    if (config.mockedResult !== undefined && config.mockedResult !== "") {
-      config.callback(config.mockedResult)
-      return
-    }
-    if (config.url === undefined || config.url === "") {
-      config.url = "https://locate.measurementlab.net/ndt7"
-    }
-    fetch(config.url)
-      .then(function (response) {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json()
-      })
-      .then(function (doc) {
-        config.callback("https://" + doc.fqdn + "/")
-      })
-  }
-
-  // startWorker starts a test in a worker. The config object structure is:
-  //
-  //     {
-  //       baseURL: "",
-  //       ontestcomplete: function() {},
-  //       ontestmeasurement: function (measurement) {},
-  //       onteststarting: function() {},
-  //       testName: "",
-  //       userAcceptedDataPolicy: true
-  //     }
-  //
-  // where
-  //
-  // - `baseURL` (`string`) is the mandatory http/https URL of the server (use
-  //   the `locate` function to get the URL of the server);
-  //
-  // - `ontestcomplete` (`function(testSpec)`) is the optional callback called
-  //   when done (see below for the testSpec structure);
-  //
-  // - `ontestmeasurement` (`function(measurement)`) is the optional callback
-  //   called when a new measurement object is emitted (see below);
-  //
-  // - `onteststarting` is like `ontestcomplete` but called at startup;
-  //
-  // - `testName` (`string`) must be one of "download", "upload";
-  //
-  // - `userAcceptedDataPolicy` MUST be present and set to true otherwise
-  //   this function will immediately throw an exception.
-  //
-  // The measurement object is described by the ndt7 specification. See
-  // https://github.com/m-lab/ndt-server/blob/master/spec/ndt7-protocol.md.
-  //
-  // The testSpec structure is like:
-  //
-  //     {
-  //       "Origin": "client",
-  //       "Test": ""
-  //     }
-  //
-  // where Origin is always "client" and Test is "download" or "upload".
   function startWorker(config) {
-    if (config === undefined || config.userAcceptedDataPolicy !== true) {
-      throw "fatal: user must accept data policy first"
-    }
     if (config.testName !== "download" && config.testName !== "upload") {
       throw "fatal: testName is neither download nor upload"
     }
@@ -164,9 +77,10 @@ const ndt7core = (function () {
   // start starts the ndt7 test suite. The config object structure is:
   //
   //     {
-  //       baseURL: "",
-  //       oncomplete: function() {},
-  //       onstarting: function() {},
+  //       baseURL: "<url>",
+  //       locate: function (callback) {},
+  //       oncomplete: function () {},
+  //       onstarting: function () {},
   //       ontestcomplete: function (testSpec) {},
   //       ontestmeasurement: function (measurement) {},
   //       onteststarting: function (testSpec) {},
@@ -175,47 +89,69 @@ const ndt7core = (function () {
   //
   // where
   //
-  // - `baseURL` (`string`) is the optional http/https URL of the server (we
-  //   will locate a suitable server if this is missing);
+  // - `baseURL` (`string`) is the HTTP/HTTPS URL of the server. We will use
+  //   WS when the scheme is HTTP; WSS when it is HTTPS. One of `baseURL` and
+  //   `locate` must be specified, otherwise this function throws.
+  //
+  // - `locate` (`function(function(err, url))`) is the function that finds
+  //   out the server with which to run the ndt7 test suite. One of `baseURL` and
+  //   `locate` must be specified, otherwise this function throws.
   //
   // - `oncomplete` (`function(testSpec)`) is the optional callback called
-  //   when the whole test suite has finished;
+  //   when the whole test suite has finished.
   //
-  // - `onstarting` is like `oncomplete` but called at startup;
+  // - `onstarting` is like `oncomplete` but called at startup.
   //
   // - `onserverurl` (`function(string)`) is called when we have located
-  //   the server URL, or immediately if you provided a baseURL;
+  //   the server URL, or immediately if you provided a baseURL.
   //
-  // - `ontestcomplete` is exactly like the `ontestcomplete` field passed
-  //   to the `startWorker` function (see above);
+  // - `ontestcomplete` (`function(testSpec)`) is the optional callback called
+  //   when done (see below for the testSpec structure).
   //
-  // - `ontestmeasurement` is exactly like the `ontestmeasurement` field passed
-  //   to the `startWorker` function (see above);
+  // - `ontestmeasurement` (`function(measurement)`) is the optional callback
+  //   called when a new measurement object is emitted (see below).
   //
-  // - `onteststarting` is exactly like the `onteststarting` field passed
-  //   to the `startWorker` function (see above);
+  // - `onteststarting` is like `ontestcomplete` but called at startup.
   //
   // - `userAcceptedDataPolicy` MUST be present and set to true otherwise
   //   this function will immediately throw an exception.
+  //
+  // The measurement object is described by the ndt7 specification. See
+  // https://github.com/m-lab/ndt-server/blob/master/spec/ndt7-protocol.md.
+  //
+  // The testSpec structure is like:
+  //
+  //     {
+  //       "Origin": "client",
+  //       "Test": ""
+  //     }
+  //
+  // where Origin is always "client" and Test is "download" or "upload".
   function start(config) {
+    if (config === undefined || config.userAcceptedDataPolicy !== true) {
+      throw "fatal: user must accept data policy first"
+    }
+    if (config.baseURL === undefined && config.locate === undefined) {
+      throw "fatal: one of baseURL and locate must be specified"
+    }
+    let locate = config.locate
+    if (config.baseURL !== undefined) {
+      locate = function (callback) {
+        callback(config.baseURL)
+      }
+    }
     if (config.onstarting !== undefined) {
       config.onstarting()
     }
-    locate({
-      callback: function (url) {
-        config.onserverurl(url)
-        startTest(config, url, "download", function () {
-          startTest(config, url, "upload", config.oncomplete)
-        })
-      },
-      mockedResult: config.baseURL,
-      userAcceptedDataPolicy: config.userAcceptedDataPolicy,
+    locate(function (url) {
+      config.onserverurl(url)
+      startTest(config, url, "download", function () {
+        startTest(config, url, "upload", config.oncomplete)
+      })
     })
   }
 
   return {
-    locate: locate,
-    startWorker: startWorker,
     start: start,
   }
 })()

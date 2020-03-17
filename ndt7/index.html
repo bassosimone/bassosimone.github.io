@@ -200,9 +200,11 @@
       }
 
       document.getElementById("run").addEventListener("click", function () {
+        const locator = ndt7locate.newInstance()
         let measurement = ndt7extra.newMeasurement((viewIsNDT5()) ? "ndt5" : "ndt7")
         const config = {
           baseURL: viewGetBaseURL(),
+          locate: locator.locate,
           oncomplete: function () {
             viewOnComplete()
             currentMeasurement = measurement.end()
@@ -268,6 +270,7 @@
     <script src="./ndt5-core.js"></script>
     <script src="./ndt7-core.js"></script>
     <script src="./ndt7-extra.js"></script>
+    <script src="./ndt7-locate.js"></script>
 
   </div>
 </body>
