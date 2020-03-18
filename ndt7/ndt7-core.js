@@ -1,40 +1,71 @@
 /* jshint esversion: 6, asi: true */
+
+// ndt7core contains the core ndt7 client functionality. Please, refer
+// to the ndt7 spec available at the following URL:
+//
+// https://github.com/m-lab/ndt-server/blob/master/spec/ndt7-protocol.md
+//
+// This implementation uses v0.9.0 of the spec.
 const ndt7core = (function () {
   "use strict"
 
-  // download implement the download Web Worker.
-  function download(ev, WebSocket, postMessage) {
-    let url = new URL(ev.data.baseURL)
+  // startDownload starts the ndt7 download. The config argument is like:
+  //
+  //     {
+  //         Blob: <class used by caller for Blob>,
+  //         Date: <class to be used as Date>,
+  //         JSON: <object containing JSON handling methods>,
+  //         WebSocket: <class to be used as WebSocket>,
+  //         baseURL: "<base URL of the ndt7 server>",
+  //         postMessage: function (msg) {
+  //             // Callback called for sending messages to controller
+  //         },
+  //     }
+  //
+  // All the arguments inside config must be specified. This function will
+  // crash if some of the arguments are undefined.
+  //
+  // The download loop will create a new config.WebSocket with an URL
+  // derived from config.baseURL, where `wss:` is used if the base URL is
+  // `https:` and `ws:` is used if the base URL is http. When the WebSocket
+  // is closed, the downloader will `config.postMessage(null)`. While the
+  // WebSocket is open, it will process incoming messages. It will send
+  // periodic updates with `config.postMessage` to the caller. Such messages
+  // will include the speed measured by the downloader at the application
+  // level and server-generated messages. The format of such messages will
+  // be compliant with the specification of ndt7.
+  function startDownload(config) {
+    let url = new URL(config.baseURL)
     url.protocol = (url.protocol === "https:") ? "wss:" : "ws:"
     url.pathname = "/ndt/v7/download"
-    const sock = new WebSocket(url.toString(), "net.measurementlab.ndt.v7")
+    const sock = new config.WebSocket(url.toString(), "net.measurementlab.ndt.v7")
     sock.onclose = function () {
       postMessage(null)
     }
     sock.onopen = function () {
-      const start = new Date().getTime()
+      const start = new config.Date().getTime()
       let previous = start
       let total = 0
       sock.onmessage = function (ev) {
-        total += (ev.data instanceof Blob) ? ev.data.size : ev.data.length
-        let now = new Date().getTime()
+        total += (ev.data instanceof config.Blob) ? ev.data.size : ev.data.length
+        let now = new config.Date().getTime()
         const every = 250  // ms
         if (now - previous > every) {
-          postMessage({
-            "AppInfo": {
-              "ElapsedTime": (now - start) * 1000,  // us
-              "NumBytes": total,
+          config.postMessage({
+            AppInfo: {
+              ElapsedTime: (now - start) * 1000,  // us
+              NumBytes: total,
             },
-            "Origin": "client",
-            "Test": "download",
+            Origin: "client",
+            Test: "download",
           })
           previous = now
         }
-        if (!(ev.data instanceof Blob)) {
-          let m = JSON.parse(ev.data)
+        if ((ev.data instanceof config.Blob) === false) {
+          let m = config.JSON.parse(ev.data)
           m.Origin = "server"
           m.Test = "download"
-          postMessage(m)
+          config.postMessage(m)
         }
       }
     }
@@ -240,13 +271,14 @@ const ndt7core = (function () {
   }
 
   return {
-    download: download,
     start: start,
+    startDownload: startDownload,
     upload: upload,
   }
 })()
+
 if (typeof exports !== "undefined") {
-  exports.download = ndt7core.download
+  exports.startDownload = ndt7core.startDownload
   exports.start = ndt7core.start
   exports.upload = ndt7core.upload
 }

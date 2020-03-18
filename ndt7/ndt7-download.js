@@ -2,5 +2,12 @@
 // WebWorker that runs the ndt7 download test
 importScripts("ndt7-core.js")
 onmessage = function (ev) {
-  ndt7core.download(ev, WebSocket, postMessage)
+  ndt7core.startDownload({
+    Blob: Blob,
+    Date: Date,
+    JSON: JSON,
+    WebSocket: WebSocket,
+    baseURL: ev.data.baseURL,
+    postMessage: self.postMessage.bind(self),
+  })
 }
