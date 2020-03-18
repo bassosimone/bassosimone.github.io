@@ -9,6 +9,9 @@
 const ndt7core = (function () {
   "use strict"
 
+  // wsproto is the WebSocket protocol required by ndt7.
+  const wsproto = "net.measurementlab.ndt.v7"
+
   // startDownload starts the ndt7 download. The config argument is like:
   //
   //     {
@@ -34,11 +37,13 @@ const ndt7core = (function () {
   // will include the speed measured by the downloader at the application
   // level and server-generated messages. The format of such messages will
   // be compliant with the specification of ndt7.
+  //
+  // When using the browser, this function is invoked by a WebWorker.
   function startDownload(config) {
     let url = new URL(config.baseURL)
     url.protocol = (url.protocol === "https:") ? "wss:" : "ws:"
     url.pathname = "/ndt/v7/download"
-    const sock = new config.WebSocket(url.toString(), "net.measurementlab.ndt.v7")
+    const sock = new config.WebSocket(url.toString(), wsproto)
     sock.onclose = function () {
       postMessage(null)
     }
@@ -71,23 +76,44 @@ const ndt7core = (function () {
     }
   }
 
-  // upload implements the upload WebWorker.
-  function upload(ev, WebSocket, postMessage) {
-    let url = new URL(ev.data.baseURL)
+  // startUpload starts the ndt7 upload. The config argument is like:
+  //
+  //     {
+  //         Date: <class to be used as Date>,
+  //         JSON: <object containing JSON handling methods>,
+  //         WebSocket: <class to be used as WebSocket>,
+  //         baseURL: "<base URL of the ndt7 server>",
+  //         postMessage: function (msg) {
+  //             // Callback called for sending messages to controller
+  //         },
+  //     }
+  //
+  // All the arguments inside config must be specified. This function will
+  // crash if some of the arguments are undefined.
+  //
+  // The upload loop will create a new config.WebSocket with an URL
+  // derived from config.baseURL, where `wss:` is used if the base URL is
+  // `https:` and `ws:` is used if the base URL is http. When the WebSocket
+  // is closed, the uploader will `config.postMessage(null)`. While the
+  // WebSocket is open, it will continuously send binary messages applying
+  // the scaling algorithm documented in the ndt7 specification.
+  //
+  // When using the browser, this function is invoked by a WebWorker.
+  function startUpload(config) {
+    let url = new URL(config.baseURL)
     url.protocol = (url.protocol === "https:") ? "wss:" : "ws:"
-    const wsproto = "net.measurementlab.ndt.v7"
     url.pathname = "/ndt/v7/upload"
-    const sock = new WebSocket(url.toString(), wsproto)
+    const sock = new config.WebSocket(url.toString(), wsproto)
     let closed = false
     sock.onclose = function () {
       closed = true
-      postMessage(null)
+      config.postMessage(null)
     }
-    function uploader(socket, data, start, previous, total) {
+    function uploader(data, start, previous, total) {
       if (closed) {
         return // socket.send() with too much buffering causes socket.close()
       }
-      let now = new Date().getTime()
+      let now = new config.Date().getTime()
       const duration = 10000  // millisecond
       if (now - start > duration) {
         sock.close()
@@ -104,26 +130,26 @@ const ndt7core = (function () {
       }
       const every = 250  // millisecond
       if (now - previous > every) {
-        postMessage({
-          "AppInfo": {
-            "ElapsedTime": (now - start) * 1000,  // us
-            "NumBytes": (total - sock.bufferedAmount),
+        config.postMessage({
+          AppInfo: {
+            ElapsedTime: (now - start) * 1000,  // us
+            NumBytes: (total - sock.bufferedAmount),
           },
-          "Origin": "client",
-          "Test": "upload",
+          Origin: "client",
+          Test: "upload",
         })
         previous = now
       }
       setTimeout(
-        function () { uploader(sock, data, start, previous, total) },
+        function () { uploader(data, start, previous, total) },
         0)
     }
     sock.onopen = function () {
       const initialMessageSize = 8192 /* (1<<13) */
       const data = new Uint8Array(initialMessageSize) // TODO(bassosimone): fill this message
       sock.binarytype = "arraybuffer"
-      const start = new Date().getTime()
-      uploader(sock, data, start, start, 0)
+      const start = new config.Date().getTime()
+      uploader(data, start, start, 0)
     }
   }
 
@@ -271,14 +297,14 @@ const ndt7core = (function () {
   }
 
   return {
-    start: start,
     startDownload: startDownload,
-    upload: upload,
+    startUpload: startUpload,
+    start: start,
   }
 })()
 
 if (typeof exports !== "undefined") {
   exports.startDownload = ndt7core.startDownload
+  exports.startUpload = ndt7core.startUpload
   exports.start = ndt7core.start
-  exports.upload = ndt7core.upload
 }

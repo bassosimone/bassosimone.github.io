@@ -2,5 +2,11 @@
 // WebWorker that runs the ndt7 upload test
 importScripts("ndt7-core.js")
 onmessage = function (ev) {
-  ndt7core.upload(ev, WebSocket, postMessage)
+  ndt7core.startUpload({
+    Date: Date,
+    JSON: JSON,
+    WebSocket: WebSocket,
+    baseURL: ev.data.baseURL,
+    postMessage: self.postMessage.bind(self),
+  })
 }
