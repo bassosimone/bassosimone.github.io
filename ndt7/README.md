@@ -8,6 +8,6 @@ python3 -m http.server
 
 then:
 
-- `http://127.0.0.1:8000` is the client;
+- `http://127.0.0.1:8000/` is the client;
 
-- `http://127.0.0.1:8000/test` is the tests.
+- `http://127.0.0.1:8000/test/` is the tests.
