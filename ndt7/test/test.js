@@ -10,7 +10,7 @@ function WebSocketMocks() {
   }
   vars.newWebSocket = function (url, protocol) {
     if (vars.instance !== undefined) {
-      throw "too many new WebSocket calls"
+      throw new Error("too many new WebSocket calls")
     }
     vars.realURL = url
     vars.realProtocol = protocol
@@ -74,8 +74,8 @@ function PostMessageMocks() {
   }
 }
 
-describe('ndt7core.startDownload', function () {
-  it('should work as intended', function (done) {
+describe("ndt7core.startDownload", function () {
+  it("should work as intended", function (done) {
     // create the mocks
     let datemocks = DateMocks()
     let postmessagemocks = PostMessageMocks()
@@ -84,7 +84,6 @@ describe('ndt7core.startDownload', function () {
     ndt7core.startDownload({
       Blob: BlobMocks,
       Date: datemocks.newDate,
-      JSON: JSON,
       WebSocket: wsmocks.newWebSocket,
       baseURL: "https://www.example.com/",
       postMessage: postmessagemocks.postMessage,
@@ -93,7 +92,7 @@ describe('ndt7core.startDownload', function () {
     datemocks.pushTime(10)
     wsmocks.open()
     if (datemocks.size() !== 0) {
-      throw "the code did not get the test start time"
+      throw new Error("the code did not get the test start time")
     }
     chai.assert(wsmocks.realURL === "wss://www.example.com/ndt/v7/download")
     chai.assert(wsmocks.realProtocol === "net.measurementlab.ndt.v7")
@@ -103,10 +102,10 @@ describe('ndt7core.startDownload', function () {
       data: new BlobMocks(new Uint8Array(4096))
     })
     if (postmessagemocks.size() !== 0) {
-      throw "the code did fire postMessage too early"
+      throw new Error("the code did fire postMessage too early")
     }
     if (datemocks.size() !== 0) {
-      throw "the code did not get the current time"
+      throw new Error("the code did not get the current time")
     }
     // we receive a server measurement
     datemocks.pushTime(150)
@@ -114,7 +113,7 @@ describe('ndt7core.startDownload', function () {
       data: `{"TCPInfo": {"RTT": 100}}`
     })
     if (postmessagemocks.size() !== 1) {
-      throw "unexpected number of posted messages"
+      throw new Error("unexpected number of posted messages")
     }
     chai.assert(_.isEqual(postmessagemocks.pop(), {
       Origin: "server",
@@ -124,7 +123,7 @@ describe('ndt7core.startDownload', function () {
       Test: "download"
     }))
     if (datemocks.size() !== 0) {
-      throw "the code did not get the current time"
+      throw new Error("the code did not get the current time")
     }
     // we receive more data after more than 250 ms from previous beginning
     datemocks.pushTime(350)
@@ -132,7 +131,7 @@ describe('ndt7core.startDownload', function () {
       data: new BlobMocks(new Uint8Array(4096))
     })
     if (postmessagemocks.size() !== 1) {
-      throw "unexpected number of posted messages"
+      throw new Error("unexpected number of posted messages")
     }
     chai.assert(_.isEqual(postmessagemocks.pop(), {
       AppInfo: {
@@ -143,14 +142,14 @@ describe('ndt7core.startDownload', function () {
       Test: "download"
     }))
     if (datemocks.size() !== 0) {
-      throw "the code did not get the current time"
+      throw new Error("the code did not get the current time")
     }
     done()
   })
 })
 
-describe('ndt7core.startUpload', function () {
-  it('should work as intended', function (done) {
+describe("ndt7core.startUpload", function () {
+  it("should work as intended", function (done) {
     // create the mocks
     let datemocks = DateMocks()
     let wsmocks = WebSocketMocks()
@@ -159,31 +158,30 @@ describe('ndt7core.startUpload', function () {
     // start download
     ndt7core.startUpload({
       Date: datemocks.newDate,
-      JSON: JSON,
       WebSocket: wsmocks.newWebSocket,
       baseURL: "https://www.example.com/",
       postMessage: function (ev) {
         if (ev === null) {
           if (wsmocks.out.length != 22) {
-            throw "unexpected number of queued messages"
+            throw new Error("unexpected number of queued messages")
           }
           if (wsmocks.out[17].length != 16384) {
-            throw "messages were not scaled"
+            throw new Error("messages were not scaled")
           }
           done()
           return
         }
         if (ev.Origin !== "client") {
-          throw "unexpected message Origin"
+          throw new Error("unexpected message Origin")
         }
         if (ev.Test !== "upload") {
-          throw "unexpected message Test"
+          throw new Error("unexpected message Test")
         }
         if (ev.AppInfo.NumBytes <= lastNumBytes) {
-          throw "NumBytes didn't increment"
+          throw new Error("NumBytes didn't increment")
         }
         if (ev.AppInfo.ElapsedTime <= lastElapsedTime) {
-          throw "ElapsedTime didn't increment"
+          throw new Error("ElapsedTime didn't increment")
         }
         lastElapsedTime = ev.AppInfo.ElapsedTime
         lastNumBytes = ev.AppInfo.NumBytes
@@ -196,5 +194,194 @@ describe('ndt7core.startUpload', function () {
     wsmocks.open()
     chai.assert(wsmocks.realURL === "wss://www.example.com/ndt/v7/upload")
     chai.assert(wsmocks.realProtocol === "net.measurementlab.ndt.v7")
+  })
+})
+
+function Mocks(config) {
+  let state = {
+    workerMain: config.workerMain,
+    workerTerminated: 0,
+  }
+  state.Worker = function () {
+    this.onerror = undefined
+    this.onmessage = undefined
+    this.terminate = function () {
+      state.workerTerminated++
+    }
+    this.postMessage = function (ev) {
+      state.workerMain(this, ev)
+    }
+  }
+  return state
+}
+
+describe("ndt7core.start", function () {
+  it("should throw if there is no config", function () {
+    chai.assert.throws(function () {
+      ndt7core.start()
+    }, Error)
+  })
+
+  it("should throw if there is no userAcceptDataPolicy field", function () {
+    chai.assert.throws(function () {
+      ndt7core.start({})
+    }, Error)
+  })
+
+  it("should throw if user did not accept data policy", function () {
+    chai.assert.throws(function () {
+      ndt7core.start({userAcceptedDataPolicy: false})
+    }, Error, "fatal: user must accept data policy first")
+  })
+
+  it("should work as intended without optional callbacks", function (done) {
+    const expectedURL = "https://www.example.com/"
+    ndt7core.start({
+      doStartWorker: function (config, url, name, callback) {
+        chai.assert(typeof config === "object")
+        chai.assert(url === expectedURL)
+        chai.assert(name === "download" || name === "upload")
+        callback()
+      },
+      locate: function (callback) {
+        callback(expectedURL)
+      },
+      oncomplete: done,
+      onstarting: function () {},
+      userAcceptedDataPolicy: true,
+    })
+  })
+
+  it("should work as intended with optional callbacks", function (done) {
+    let calledOnStarting = false
+    let calledOnServerURL = false
+    const expectedURL = "https://www.example.com/"
+    ndt7core.start({
+      doStartWorker: function (config, url, name, callback) {
+        chai.assert(typeof config === "object")
+        chai.assert(url === expectedURL)
+        chai.assert(name === "download" || name === "upload")
+        chai.assert(calledOnServerURL == true)
+        chai.assert(calledOnStarting == true)
+        callback()
+      },
+      locate: function (callback) {
+        callback(expectedURL)
+      },
+      oncomplete: done,
+      onstarting: function () {
+        calledOnStarting = true
+      },
+      onserverurl: function (url) {
+        calledOnServerURL = true
+        chai.assert(url === expectedURL)
+      },
+      userAcceptedDataPolicy: true,
+    })
+  })
+
+  it("should behave correctly when the worker is killed", function (done) {
+    let complete = []
+    let mocks = Mocks({
+      workerMain: function () {}
+    })
+    ndt7core.start({
+      Worker: mocks.Worker,
+      killAfter: 7,
+      locate: function (callback) {
+        callback("https://www.example.com/")
+      },
+      oncomplete: function () {
+        chai.assert(mocks.workerTerminated === 2)
+        chai.assert(complete.length === 2)
+        chai.assert(complete[0].Origin === "client")
+        chai.assert(complete[0].Test === "download")
+        chai.assert(complete[0].WorkerInfo.ElapsedTime > 0)
+        chai.assert(complete[0].WorkerInfo.Error === "Terminated with timeout")
+        chai.assert(complete[1].Origin === "client")
+        chai.assert(complete[1].Test === "upload")
+        chai.assert(complete[1].WorkerInfo.ElapsedTime > 0)
+        chai.assert(complete[1].WorkerInfo.Error === "Terminated with timeout")
+        done()
+      },
+      ontestcomplete: function (ev) {
+        complete.push(ev)
+      },
+      userAcceptedDataPolicy: true,
+    })
+  })
+
+  it("should behave correctly when the worker throws", function (done) {
+    let complete = []
+    let mocks = Mocks({
+      workerMain: function (worker) {
+        setTimeout(function () {
+          worker.onerror({})
+        }, 10)
+      }
+    })
+    ndt7core.start({
+      Worker: mocks.Worker,
+      locate: function (callback) {
+        callback("https://www.example.com/")
+      },
+      oncomplete: function () {
+        chai.assert(complete.length === 2)
+        chai.assert(complete[0].Origin === "client")
+        chai.assert(complete[0].Test === "download")
+        chai.assert(complete[0].WorkerInfo.ElapsedTime > 0)
+        chai.assert(complete[0].WorkerInfo.Error === "Terminated with exception")
+        chai.assert(complete[1].Origin === "client")
+        chai.assert(complete[1].Test === "upload")
+        chai.assert(complete[1].WorkerInfo.ElapsedTime > 0)
+        chai.assert(complete[1].WorkerInfo.Error === "Terminated with exception")
+        done()
+      },
+      ontestcomplete: function (ev) {
+        complete.push(ev)
+      },
+      userAcceptedDataPolicy: true,
+    })
+  })
+
+  it("should behave correctly when the worker works as intended", function (done) {
+    let complete = []
+    let mocks = Mocks({
+      workerMain: function (worker) {
+        setTimeout(function () {
+          worker.onmessage({data: {antani: 1}})
+          worker.onmessage({data: null})
+        }, 7)
+      }
+    })
+    let msgs = []
+    ndt7core.start({
+      Worker: mocks.Worker,
+      locate: function (callback) {
+        callback("https://www.example.com/")
+      },
+      oncomplete: function () {
+        chai.assert(msgs.length === 2)
+        chai.assert(msgs[0].antani === 1)
+        chai.assert(msgs[1].antani === 1)
+        chai.assert(complete.length === 2)
+        chai.assert(complete[0].Origin === "client")
+        chai.assert(complete[0].Test === "download")
+        chai.assert(complete[0].WorkerInfo.ElapsedTime > 0)
+        chai.assert(complete[0].WorkerInfo.Error === null)
+        chai.assert(complete[1].Origin === "client")
+        chai.assert(complete[1].Test === "upload")
+        chai.assert(complete[1].WorkerInfo.ElapsedTime > 0)
+        chai.assert(complete[1].WorkerInfo.Error === null)
+        done()
+      },
+      ontestcomplete: function (ev) {
+        complete.push(ev)
+      },
+      ontestmeasurement: function (ev) {
+        msgs.push(ev)
+      },
+      userAcceptedDataPolicy: true,
+    })
   })
 })

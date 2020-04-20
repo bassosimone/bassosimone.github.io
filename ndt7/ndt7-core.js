@@ -9,51 +9,33 @@
 const ndt7core = (function () {
   "use strict"
 
-  // wsproto is the WebSocket protocol required by ndt7.
+  function maybeCall(f, msg) {
+    f ? f(msg) : null
+  }
+
+  function funcOrDefault(f, df) {
+    return f ? f : df
+  }
+
   const wsproto = "net.measurementlab.ndt.v7"
 
-  // startDownload starts the ndt7 download. The config argument is like:
-  //
-  //     {
-  //         Blob: <class used by caller for Blob>,
-  //         Date: <class to be used as Date>,
-  //         JSON: <object containing JSON handling methods>,
-  //         WebSocket: <class to be used as WebSocket>,
-  //         baseURL: "<base URL of the ndt7 server>",
-  //         postMessage: function (msg) {
-  //             // Callback called for sending messages to controller
-  //         },
-  //     }
-  //
-  // All the arguments inside config must be specified. This function will
-  // crash if some of the arguments are undefined.
-  //
-  // The download loop will create a new config.WebSocket with an URL
-  // derived from config.baseURL, where `wss:` is used if the base URL is
-  // `https:` and `ws:` is used if the base URL is http. When the WebSocket
-  // is closed, the downloader will `config.postMessage(null)`. While the
-  // WebSocket is open, it will process incoming messages. It will send
-  // periodic updates with `config.postMessage` to the caller. Such messages
-  // will include the speed measured by the downloader at the application
-  // level and server-generated messages. The format of such messages will
-  // be compliant with the specification of ndt7.
-  //
-  // When using the browser, this function is invoked by a WebWorker.
   function startDownload(config) {
     let url = new URL(config.baseURL)
     url.protocol = (url.protocol === "https:") ? "wss:" : "ws:"
     url.pathname = "/ndt/v7/download"
-    const sock = new config.WebSocket(url.toString(), wsproto)
+    const sock = new (config.WebSocket || WebSocket)(url.toString(), wsproto)
     sock.onclose = function () {
       postMessage(null)
     }
+    const DateType = config.Date || Date
+    const BlobType = config.Blob || Blob
     sock.onopen = function () {
-      const start = new config.Date().getTime()
+      const start = new DateType().getTime()
       let previous = start
       let total = 0
       sock.onmessage = function (ev) {
-        total += (ev.data instanceof config.Blob) ? ev.data.size : ev.data.length
-        let now = new config.Date().getTime()
+        total += (ev.data instanceof BlobType) ? ev.data.size : ev.data.length
+        let now = new DateType().getTime()
         const every = 250  // ms
         if (now - previous > every) {
           config.postMessage({
@@ -66,8 +48,8 @@ const ndt7core = (function () {
           })
           previous = now
         }
-        if ((ev.data instanceof config.Blob) === false) {
-          let m = config.JSON.parse(ev.data)
+        if ((ev.data instanceof BlobType) === false) {
+          let m = JSON.parse(ev.data)
           m.Origin = "server"
           m.Test = "download"
           config.postMessage(m)
@@ -76,51 +58,24 @@ const ndt7core = (function () {
     }
   }
 
-  // startUpload starts the ndt7 upload. The config argument is like:
-  //
-  //     {
-  //         Date: <class to be used as Date>,
-  //         JSON: <object containing JSON handling methods>,
-  //         WebSocket: <class to be used as WebSocket>,
-  //         baseURL: "<base URL of the ndt7 server>",
-  //         postMessage: function (msg) {
-  //             // Callback called for sending messages to controller
-  //         },
-  //     }
-  //
-  // All the arguments inside config must be specified. This function will
-  // crash if some of the arguments are undefined.
-  //
-  // The upload loop will create a new config.WebSocket with an URL
-  // derived from config.baseURL, where `wss:` is used if the base URL is
-  // `https:` and `ws:` is used if the base URL is http. When the WebSocket
-  // is closed, the uploader will `config.postMessage(null)`. While the
-  // WebSocket is open, it will continuously send binary messages applying
-  // the scaling algorithm documented in the ndt7 specification.
-  //
-  // When using the browser, this function is invoked by a WebWorker.
-  //
-  // Bug
-  //
-  // This function did not work correctly with Edge before edge was modified
-  // to use Chromium as its underlying engine.
   function startUpload(config) {
     let url = new URL(config.baseURL)
     url.protocol = (url.protocol === "https:") ? "wss:" : "ws:"
     url.pathname = "/ndt/v7/upload"
-    const sock = new config.WebSocket(url.toString(), wsproto)
+    const sock = new (config.WebSocket || WebSocket)(url.toString(), wsproto)
     let closed = false
     sock.onclose = function () {
       closed = true
       config.postMessage(null)
     }
+    const DateType = config.Date || Date
     function uploader(data, start, previous, total) {
       if (closed) {
         // socket.send() with too much buffering causes socket.close(). We only
         // observed this behaviour with pre-Chromium Edge.
         return
       }
-      let now = new config.Date().getTime()
+      let now = new DateType().getTime()
       const duration = 10000  // millisecond
       if (now - start > duration) {
         sock.close()
@@ -158,148 +113,57 @@ const ndt7core = (function () {
       // TODO(bassosimone): fill this message - see above comment
       const data = new Uint8Array(initialMessageSize)
       sock.binarytype = "arraybuffer"
-      const start = new config.Date().getTime()
+      const start = new DateType().getTime()
       uploader(data, start, start, 0)
     }
   }
 
-  function startWorker(config) {
-    if (config.testName !== "download" && config.testName !== "upload") {
-      throw "fatal: testName is neither download nor upload"
-    }
-    if (config.baseURL === undefined || config.baseURL === "") {
-      throw "fatal: baseURL not provided"
-    }
-    if (config.onteststarting !== undefined) {
-      config.onteststarting({
-        "Origin": "client",
-        "Test": config.testName,
-      })
-    }
-    const start = new Date().getTime()
+  function startWorker(config, baseURL, testName, callback) {
+    maybeCall(config.onteststarting, {Origin: "client", Test: testName})
+    const DateType = config.Date || Date
+    const start = new DateType().getTime()
     let done = false
-    let worker = config.newWorker("ndt7-" + config.testName + ".js")
+    let worker = new (config.Worker || Worker)("ndt7-" + testName + ".js")
     function finish(error) {
       if (!done) {
         done = true
-        const stop = new Date().getTime()
-        if (config.ontestcomplete !== undefined) {
-          config.ontestcomplete({
-            "Origin": "client",
-            "Test": config.testName,
-            "WorkerInfo": {
-              "ElapsedTime": (stop - start) * 1000, // us
-              "Error": error,
-            },
-          })
-        }
+        maybeCall(config.ontestcomplete, {
+          Origin: "client",
+          Test: testName,
+          WorkerInfo: {
+            ElapsedTime: (new DateType().getTime() - start) * 1000, // us
+            Error: error,
+          },
+        })
+        callback()
       }
     }
     worker.onerror = function (ev) {
       finish(ev.message || "Terminated with exception")
     }
     worker.onmessage = function (ev) {
-      if (ev.data === null) {
-        finish(null)
-        return
-      }
-      if (config.ontestmeasurement !== undefined) {
-        config.ontestmeasurement(ev.data)
-      }
+      ev.data === null ? finish(null) : maybeCall(config.ontestmeasurement, ev.data)
     }
     // Kill the worker after the timeout. This forces the browser to
     // close the WebSockets and prevents too-long tests.
-    const killAfter = 10000 // ms
+    const killAfter = config.killAfter || 10000 // ms
     setTimeout(function () {
       worker.terminate()
       finish("Terminated with timeout")
     }, killAfter)
-    worker.postMessage({baseURL: config.baseURL})
+    worker.postMessage({baseURL: baseURL})
   }
 
-  function startTest(config, url, testName, callback) {
-    startWorker({
-      baseURL: url,
-      newWorker: config.newWorker,
-      onteststarting: config.onteststarting,
-      ontestmeasurement: config.ontestmeasurement,
-      ontestcomplete: function (ev) {
-        if (config.ontestcomplete !== undefined) {
-          config.ontestcomplete(ev)
-        }
-        callback()
-      },
-      testName: testName,
-      userAcceptedDataPolicy: config.userAcceptedDataPolicy,
-    })
-  }
-
-  // start starts the ndt7 test suite. The config object structure is:
-  //
-  //     {
-  //       locate: function (callback) {},
-  //       oncomplete: function () {},
-  //       onstarting: function () {},
-  //       ontestcomplete: function (testSpec) {},
-  //       ontestmeasurement: function (measurement) {},
-  //       onteststarting: function (testSpec) {},
-  //       userAcceptedDataPolicy: true
-  //     }
-  //
-  // where
-  //
-  // - `locate` (`function(function(url))`) is the function that finds
-  //   out the server with which to run the ndt7 test suite.
-  //
-  // - `oncomplete` (`function(testSpec)`) is the optional callback called
-  //   when the whole test suite has finished.
-  //
-  // - `onstarting` is like `oncomplete` but called at startup.
-  //
-  // - `onserverurl` (`function(string)`) is called when we have located
-  //   the server URL, or immediately if you provided a baseURL.
-  //
-  // - `ontestcomplete` (`function(testSpec)`) is the optional callback called
-  //   when done (see below for the testSpec structure).
-  //
-  // - `ontestmeasurement` (`function(measurement)`) is the optional callback
-  //   called when a new measurement object is emitted (see below).
-  //
-  // - `onteststarting` is like `ontestcomplete` but called at startup.
-  //
-  // - `userAcceptedDataPolicy` MUST be present and set to true otherwise
-  //   this function will immediately throw an exception.
-  //
-  // The measurement object is described by the ndt7 specification. See
-  // https://github.com/m-lab/ndt-server/blob/master/spec/ndt7-protocol.md.
-  //
-  // The testSpec structure is like:
-  //
-  //     {
-  //       "Origin": "client",
-  //       "Test": ""
-  //     }
-  //
-  // where Origin is always "client" and Test is "download" or "upload".
   function start(config) {
-    if (config === undefined || config.userAcceptedDataPolicy !== true) {
-      throw "fatal: user must accept data policy first"
+    if (config.userAcceptedDataPolicy !== true) {
+      throw new Error("fatal: user must accept data policy first")
     }
-    if (config.locate === undefined) {
-      throw "fatal: locate must be specified"
-    }
-    if (config.onstarting !== undefined) {
-      config.onstarting()
-    }
-    if (config.newWorker === undefined) {
-      config.newWorker = function (filepath) {
-        return new Worker(filepath)
-      }
-    }
+    maybeCall(config.onstarting)
+    const doStartWorker = funcOrDefault(config.doStartWorker, startWorker)
     config.locate(function (url) {
-      config.onserverurl(url)
-      startTest(config, url, "download", function () {
-        startTest(config, url, "upload", config.oncomplete)
+      maybeCall(config.onserverurl, url)
+      doStartWorker(config, url, "download", function () {
+        doStartWorker(config, url, "upload", config.oncomplete)
       })
     })
   }
