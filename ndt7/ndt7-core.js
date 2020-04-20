@@ -25,7 +25,7 @@ const ndt7core = (function () {
     url.pathname = "/ndt/v7/download"
     const sock = new (config.WebSocket || WebSocket)(url.toString(), wsproto)
     sock.onclose = function () {
-      postMessage(null)
+      config.postMessage(null)
     }
     const DateType = config.Date || Date
     const BlobType = config.Blob || Blob
