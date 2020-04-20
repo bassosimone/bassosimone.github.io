@@ -4,6 +4,7 @@
 function WebSocketMocks() {
   let vars = {
     instance: undefined,
+    out: [],
     realURL: undefined,
     realProtocol: undefined,
   }
@@ -16,6 +17,13 @@ function WebSocketMocks() {
     this.onclose = undefined
     this.onopen = undefined
     this.onmessage = undefined
+    this.close = function () {
+      this.onclose()
+    }
+    this.bufferedAmount = 0
+    this.send = function (msg) {
+      vars.out.push(msg)
+    }
     vars.instance = this
   }
   vars.open = function () {
@@ -41,7 +49,7 @@ function DateMocks() {
         return times.pop()
       }
     },
-    setTime: function (now) {
+    pushTime: function (now) {
       times.push(now)
     },
     size: function () {
@@ -82,7 +90,7 @@ describe('ndt7core.startDownload', function () {
       postMessage: postmessagemocks.postMessage,
     })
     // we open the connection
-    datemocks.setTime(10)
+    datemocks.pushTime(10)
     wsmocks.open()
     if (datemocks.size() !== 0) {
       throw "the code did not get the test start time"
@@ -90,7 +98,7 @@ describe('ndt7core.startDownload', function () {
     chai.assert(wsmocks.realURL === "wss://www.example.com/ndt/v7/download")
     chai.assert(wsmocks.realProtocol === "net.measurementlab.ndt.v7")
     // we receive a binary messages
-    datemocks.setTime(100)
+    datemocks.pushTime(100)
     wsmocks.send({
       data: new BlobMocks(new Uint8Array(4096))
     })
@@ -101,7 +109,7 @@ describe('ndt7core.startDownload', function () {
       throw "the code did not get the current time"
     }
     // we receive a server measurement
-    datemocks.setTime(150)
+    datemocks.pushTime(150)
     wsmocks.send({
       data: `{"TCPInfo": {"RTT": 100}}`
     })
@@ -119,7 +127,7 @@ describe('ndt7core.startDownload', function () {
       throw "the code did not get the current time"
     }
     // we receive more data after more than 250 ms from previous beginning
-    datemocks.setTime(350)
+    datemocks.pushTime(350)
     wsmocks.send({
       data: new BlobMocks(new Uint8Array(4096))
     })
@@ -138,5 +146,55 @@ describe('ndt7core.startDownload', function () {
       throw "the code did not get the current time"
     }
     done()
+  })
+})
+
+describe('ndt7core.startUpload', function () {
+  it('should work as intended', function (done) {
+    // create the mocks
+    let datemocks = DateMocks()
+    let wsmocks = WebSocketMocks()
+    let lastNumBytes = 0
+    let lastElapsedTime = 0
+    // start download
+    ndt7core.startUpload({
+      Date: datemocks.newDate,
+      JSON: JSON,
+      WebSocket: wsmocks.newWebSocket,
+      baseURL: "https://www.example.com/",
+      postMessage: function (ev) {
+        if (ev === null) {
+          if (wsmocks.out.length != 22) {
+            throw "unexpected number of queued messages"
+          }
+          if (wsmocks.out[17].length != 16384) {
+            throw "messages were not scaled"
+          }
+          done()
+          return
+        }
+        if (ev.Origin !== "client") {
+          throw "unexpected message Origin"
+        }
+        if (ev.Test !== "upload") {
+          throw "unexpected message Test"
+        }
+        if (ev.AppInfo.NumBytes <= lastNumBytes) {
+          throw "NumBytes didn't increment"
+        }
+        if (ev.AppInfo.ElapsedTime <= lastElapsedTime) {
+          throw "ElapsedTime didn't increment"
+        }
+        lastElapsedTime = ev.AppInfo.ElapsedTime
+        lastNumBytes = ev.AppInfo.NumBytes
+      }
+    })
+    // we open the connection
+    for (let t = 11000; t > 0; t -= 440) { // reverse order since we push
+      datemocks.pushTime(t)
+    }
+    wsmocks.open()
+    chai.assert(wsmocks.realURL === "wss://www.example.com/ndt/v7/upload")
+    chai.assert(wsmocks.realProtocol === "net.measurementlab.ndt.v7")
   })
 })
