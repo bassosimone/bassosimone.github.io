@@ -99,6 +99,11 @@ const ndt7core = (function () {
   // the scaling algorithm documented in the ndt7 specification.
   //
   // When using the browser, this function is invoked by a WebWorker.
+  //
+  // Bug
+  //
+  // This function did not work correctly with Edge before edge was modified
+  // to use Chromium as its underlying engine.
   function startUpload(config) {
     let url = new URL(config.baseURL)
     url.protocol = (url.protocol === "https:") ? "wss:" : "ws:"
@@ -111,7 +116,9 @@ const ndt7core = (function () {
     }
     function uploader(data, start, previous, total) {
       if (closed) {
-        return // socket.send() with too much buffering causes socket.close()
+        // socket.send() with too much buffering causes socket.close(). We only
+        // observed this behaviour with pre-Chromium Edge.
+        return
       }
       let now = new config.Date().getTime()
       const duration = 10000  // millisecond
@@ -121,7 +128,9 @@ const ndt7core = (function () {
       }
       const maxMessageSize = 16777216 /* = (1<<24) = 16MB */
       if (data.length < maxMessageSize && data.length < (total - sock.bufferedAmount) / 16) {
-        data = new Uint8Array(data.length * 2) // TODO(bassosimone): fill this message
+        // TODO(bassosimone): fill this message. Filling the message is not a
+        // concern when we're using secure WebSockets.
+        data = new Uint8Array(data.length * 2)
       }
       const underbuffered = 7 * data.length
       if (sock.bufferedAmount < underbuffered) {
@@ -146,7 +155,8 @@ const ndt7core = (function () {
     }
     sock.onopen = function () {
       const initialMessageSize = 8192 /* (1<<13) */
-      const data = new Uint8Array(initialMessageSize) // TODO(bassosimone): fill this message
+      // TODO(bassosimone): fill this message - see above comment
+      const data = new Uint8Array(initialMessageSize)
       sock.binarytype = "arraybuffer"
       const start = new config.Date().getTime()
       uploader(data, start, start, 0)
@@ -204,9 +214,7 @@ const ndt7core = (function () {
       worker.terminate()
       finish("Terminated with timeout")
     }, killAfter)
-    worker.postMessage({
-      baseURL: config.baseURL,
-    })
+    worker.postMessage({baseURL: config.baseURL})
   }
 
   function startTest(config, url, testName, callback) {
@@ -240,7 +248,7 @@ const ndt7core = (function () {
   //
   // where
   //
-  // - `locate` (`function(function(err, url))`) is the function that finds
+  // - `locate` (`function(function(url))`) is the function that finds
   //   out the server with which to run the ndt7 test suite.
   //
   // - `oncomplete` (`function(testSpec)`) is the optional callback called
