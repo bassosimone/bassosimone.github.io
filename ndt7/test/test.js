@@ -347,7 +347,8 @@ describe("ndt7core.start", function () {
   it("should behave correctly when the worker works as intended", function (done) {
     let complete = []
     let mocks = Mocks({
-      workerMain: function (worker) {
+      workerMain: function (worker, ev) {
+        chai.assert(ev.baseURL === "https://www.example.com/")
         setTimeout(function () {
           worker.onmessage({data: {antani: 1}})
           worker.onmessage({data: null})
