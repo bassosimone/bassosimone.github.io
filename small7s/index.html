@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+
+<head></head>
+
+<body>
+  <script>
+
+    function startWorker(url, testName, callback) {
+      const start = new Date().getTime()
+      let done = false
+      let worker = new Worker("ndt7-" + testName + ".js")
+      function finish(ev) {
+        if (!done) {
+          console.log(ev)
+          done = true
+          callback()
+        }
+      }
+      worker.onerror = function (ev) {
+        finish("Terminated with exception")
+      }
+      worker.onmessage = function (ev) {
+        finish("Terminated cleanly")
+      }
+      // Kill the worker after the timeout. This forces the browser to
+      // close the WebSockets and prevents too-long tests.
+      const killAfter = 10000 // ms
+      setTimeout(() => {
+        worker.terminate()
+        finish("Terminated with timeout")
+      }, killAfter)
+      worker.postMessage({url})
+    }
+
+    const run = async () => {
+      const locateURL = `https://locate.measurementlab.net/v2/nearest/ndt/ndt7`
+      const response = await fetch(locateURL)
+      const body = await response.json()
+      const entries = body.results
+      const idx = Math.floor(Math.random() * entries.length)
+      console.log(entries[idx])
+      const downloadURL = entries[idx].urls["wss:///ndt/v7/download"]
+      const uploadURL = entries[idx].urls["wss:///ndt/v7/upload"]
+      startWorker(downloadURL, "download", () => {
+        startWorker(uploadURL, "upload", () => {
+          console.log("done")
+        })
+      })
+    }
+
+    run()
+  </script>
+</body>
