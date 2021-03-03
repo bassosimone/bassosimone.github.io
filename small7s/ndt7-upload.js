@@ -1,18 +1,12 @@
 onmessage = function (ev) {
   const wsproto = "net.measurementlab.ndt.v7"
-  const zero = new Date().getTime()
-
-  const log = (...message) => {
-    const t = new Date().getTime()
-    console.log(t - zero, ...message)
-  }
 
   const doUpload = (url, callback) => {
     let isclosed = false
     const sock = new WebSocket(url, wsproto)
 
     sock.onclose = () => {
-      log("upload onclose")
+      postMessage({m: "upload onclose"})
       if (!isclosed) {
         isclosed = true
         callback()
@@ -28,7 +22,7 @@ onmessage = function (ev) {
       let now = new Date().getTime()
       const duration = 10000  // millisecond
       if (now - start > duration) {
-        log("upload enough")
+        postMessage({m: "upload enough"})
         sock.close()
         return
       }
@@ -46,14 +40,14 @@ onmessage = function (ev) {
       const every = 250  // millisecond
       if (now - previous > every) {
         const speed = (total - sock.bufferedAmount) * 8 / ((now - start) * 1000)
-        log("upload", speed)
+        postMessage({m: "upload", v: speed, n: sock.bufferedAmount})
         previous = now
       }
       setTimeout(() => { uploader(data, start, previous, total) }, 0)
     }
 
     sock.onopen = function () {
-      log("upload onopen")
+      postMessage({m: "upload onopen"})
       const initialMessageSize = 8192
       // TODO(bassosimone): fill this message - see above comment
       const data = new Uint8Array(initialMessageSize)
@@ -63,5 +57,5 @@ onmessage = function (ev) {
     }
   }
 
-  doUpload(ev.data.url, () => postMessage(null))
+  doUpload(ev.data.url, () => postMessage({m: null}))
 }

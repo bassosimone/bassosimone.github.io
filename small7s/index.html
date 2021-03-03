@@ -4,6 +4,12 @@
 
 <body>
   <script>
+    const zero = new Date().getTime()
+
+    const log = (...message) => {
+      const t = new Date().getTime()
+      console.log(t - zero, ...message)
+    }
 
     function startWorker(url, testName, callback) {
       const start = new Date().getTime()
@@ -20,7 +26,11 @@
         finish("Terminated with exception")
       }
       worker.onmessage = function (ev) {
-        finish("Terminated cleanly")
+        if (ev.data.m === null) {
+          finish("Terminated cleanly")
+          return
+        }
+        log(ev.data)
       }
       // Kill the worker after the timeout. This forces the browser to
       // close the WebSockets and prevents too-long tests.
@@ -29,7 +39,7 @@
         worker.terminate()
         finish("Terminated with timeout")
       }, killAfter)
-      worker.postMessage({url})
+      worker.postMessage({ url })
     }
 
     const run = async () => {
