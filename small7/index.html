@@ -27,6 +27,7 @@
           if (now - previous > every) {
             const speed = total * 8 / ((now - start) * 1000)
             log("download", speed)
+            previous = now
           }
         }
       }
