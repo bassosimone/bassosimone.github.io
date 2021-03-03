@@ -63,13 +63,13 @@
           sock.close()
           return
         }
-        const maxMessageSize = 16777216 / 2
+        const maxMessageSize = 16777216
         if (data.length < maxMessageSize && data.length < (total - sock.bufferedAmount) / 16) {
           // TODO(bassosimone): fill this message. Filling the message is not a
           // concern when we're using secure WebSockets.
           data = new Uint8Array(data.length * 2)
         }
-        const underbuffered = 7 * data.length
+        const underbuffered = Math.min(7 * data.length, 33554432)
         if (sock.bufferedAmount < underbuffered) {
           sock.send(data)
           total += data.length
