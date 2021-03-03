@@ -77,7 +77,7 @@
         const every = 250  // millisecond
         if (now - previous > every) {
           const speed = (total - sock.bufferedAmount) * 8 / ((now - start) * 1000)
-          log("upload", speed)
+          log("upload", speed, sock.bufferedAmount)
           previous = now
         }
         setTimeout(() => { uploader(data, start, previous, total) }, 0)
