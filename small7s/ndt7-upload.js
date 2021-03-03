@@ -26,7 +26,7 @@ onmessage = function (ev) {
         sock.close()
         return
       }
-      const maxMessageSize = 16777216
+      const maxMessageSize = 16777216 / 2
       if (data.length < maxMessageSize && data.length < (total - sock.bufferedAmount) / 16) {
         // TODO(bassosimone): fill this message. Filling the message is not a
         // concern when we're using secure WebSockets.
