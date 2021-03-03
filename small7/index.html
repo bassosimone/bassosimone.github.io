@@ -96,8 +96,8 @@
 
     const run = async () => {
       const locateURL = `https://locate.measurementlab.net/v2/nearest/ndt/ndt7`
-      const req = await fetch(locateURL)
-      const body = await req.json()
+      const response = await fetch(locateURL)
+      const body = await response.json()
       const entries = body.results
       const idx = Math.floor(Math.random() * entries.length)
       log(entries[idx])
