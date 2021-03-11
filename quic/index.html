@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <title>тестирование твиттера с помощью quic</title>
+  <meta charset="utf-8">
+  <!-- QuicTransport origin trial token. See https://developers.chrome.com/origintrials/#/view_trial/-6744140441987317759 -->
+  <meta http-equiv="origin-trial" content="AkxiaZECg+SJYX65YeewFsfTCGPysER6TR0l1sSkNN5ZoTIuOjAgFT1jHUbYvonEs+8mWBBZE/pEy6JoDoopLgYAAABceyJvcmlnaW4iOiJodHRwczovL2Jhc3Nvc2ltb25lLmdpdGh1Yi5pbzo0NDMiLCJmZWF0dXJlIjoiUXVpY1RyYW5zcG9ydCIsImV4cGlyeSI6MTYyMTM4MjM5OX0=">
+  <script>
+(async function () {
+  const url = "https://abs.twimg.com/sticky/illustrations/lohp_1302x955.png?nocache=0.3894493122026307"
+  const wt = new QUICTransport(url)
+  await wt.ready;
+  for await (const rs of wt.incomingUnidirectionalStreams) {
+    for await (const buffer of rs.readable) {
+      console.log(buffer)
+    }
+  }
+})()
+  </script>
+  <body>
+  </body>
+</html>
