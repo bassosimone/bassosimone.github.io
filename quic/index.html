@@ -7,7 +7,7 @@
   <script>
 (async function () {
   const url = "https://abs.twimg.com/sticky/illustrations/lohp_1302x955.png?nocache=0.3894493122026307"
-  const wt = new QUICTransport(url)
+  const wt = new WebTransport(url)
   await wt.ready;
   for await (const rs of wt.incomingUnidirectionalStreams) {
     for await (const buffer of rs.readable) {
