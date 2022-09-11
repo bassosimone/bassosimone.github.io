@@ -509,7 +509,7 @@ function analysisProcessWebConnectivityTestKeys(measurement, tk, analysis) {
     table.push(["probe", "x_dns_flags", tk["x_dns_flags"], __explainDNSFlags(tk)])
     table.push(["probe", "dns_consistency", tk["dns_consistency"], ""])
     table.push(["probe", "body_length_match", tk["body_length_match"], ""])
-    table.push(["probe", "haders_match", tk["haders_match"], ""])
+    table.push(["probe", "headers_match", tk["headers_match"], ""])
     table.push(["probe", "status_code_match", tk["status_code_match"], ""])
     table.push(["probe", "title_match", tk["title_match"], ""])
     table.push(["probe", "x_blocking_flags", tk["x_blocking_flags"], __explainBlockingFlags(tk)])
