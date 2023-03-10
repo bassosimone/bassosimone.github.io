@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>OONI Sprint Planning</title>
+</head>
+
+<body>
+  <h1>Sprint Planning</h1>
+  <p>The current sprint is <span id="currentSprint"></span>.</p>
+  <p>The next sprints are:</p>
+  <ul id="nextSprints"></ul>
+</body>
+
+<script type="text/javascript">
+  // millisecondInAWeek is the number of millisecond in a week
+  const millisecondInAWeek = 1000 * 60 * 60 * 24 * 7
+
+  // getSprintInfo returns information on the sprint based on the
+  // date passed as argument to this function.
+  const getSprintInfo = function (date) {
+    // work without mutating the original date object
+    date = new Date(date.getTime())
+
+    // make sure we discard the hours and use midnight as the reference
+    date.setHours(0, 0, 0, 0)
+
+    // baseSprintDate is the date when the base sprint started
+    const baseSprintDate = new Date("2021-12-20")
+
+    // baseSprintNumber is the number of the base sprint
+    const baseSprintNumber = 55
+
+    // elapsedMillisec is the elapsed milliseconds between
+    // the reference date and today's date
+    const elapsedMillisec = date - baseSprintDate
+
+    // elapsedWeeks is the number of weeks elapsed between
+    // the reference date and today's date
+    const elapsedWeeks = elapsedMillisec / millisecondInAWeek
+
+    // elapsedSprints is the number of elapsed sprints since
+    // the reference date and until today
+    const elapsedSprints = Math.floor(elapsedWeeks / 2)
+
+    // sprintNumber is the date sprint number
+    const sprintNumber = baseSprintNumber + elapsedSprints
+
+    // sprintStarted is when the sprint started
+    const sprintStarted = new Date(baseSprintDate.getTime() + (2 * elapsedSprints * millisecondInAWeek))
+
+    // sprintEnded is when the sprint ended
+    const sprintEnded = new Date(baseSprintDate.getTime() + (2 * (elapsedSprints + 1) * millisecondInAWeek))
+
+    console.log(sprintStarted)
+
+    // formatDate is an helper function to format a date
+    const formatDate = function (d) {
+      return new Date(d).toISOString().slice(0, 10)
+    }
+
+    // prepare a string representation of the sprint
+    const sprintString = `Sprint ${sprintNumber} (${formatDate(sprintStarted)} - ${formatDate(sprintEnded)})`
+
+    // return info to the caller
+    return {
+      number: sprintNumber,
+      started: sprintStarted,
+      ended: sprintEnded,
+      stringRepr: sprintString,
+    }
+  }
+
+  // obtain info about the current sprint
+  const currentSprint = getSprintInfo(new Date())
+
+  // write such info into the document
+  document.getElementById("currentSprint").textContent = currentSprint.stringRepr
+
+  // write information about the next 32 sprints
+  const numSprints = 32
+  for (let idx = 0; idx < numSprints; idx++) {
+    const referenceDate = new Date(new Date().getTime() + (2 * idx * millisecondInAWeek))
+    const sprintInfo = getSprintInfo(referenceDate)
+    var list = document.getElementById("nextSprints")
+    var e = document.createElement("li")
+    e.appendChild(document.createTextNode(sprintInfo.stringRepr))
+    list.appendChild(e)
+  }
+</script>
+
+</html>
