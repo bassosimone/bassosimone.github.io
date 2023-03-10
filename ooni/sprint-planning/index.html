@@ -79,7 +79,7 @@
 
   // write information about the next 32 sprints
   const numSprints = 32
-  for (let idx = 0; idx < numSprints; idx++) {
+  for (let idx = 1; idx < numSprints; idx++) {
     const referenceDate = new Date(new Date().getTime() + (2 * idx * millisecondInAWeek))
     const sprintInfo = getSprintInfo(referenceDate)
     var list = document.getElementById("nextSprints")
