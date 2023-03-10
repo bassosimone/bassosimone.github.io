@@ -8,8 +8,10 @@
 <body>
   <h1>Sprint Planning</h1>
   <p>The current sprint is <span id="currentSprint"></span>.</p>
+
   <p>The next sprints are:</p>
   <ul id="nextSprints"></ul>
+
 </body>
 
 <script type="text/javascript">
@@ -111,8 +113,18 @@
     // sprintStarted is when the sprint started
     const sprintStarted = new Date(baseSprintDate.getTime() + (2 * elapsedSprints * millisecondInAWeek))
 
+    // sanity check for the first day of the sprint
+    if (sprintStarted.getDay() !== 1) {
+      throw new Error("a sprint should start on a Monday")
+    }
+
     // sprintEnded is when the sprint ended
-    const sprintEnded = new Date(baseSprintDate.getTime() + (2 * (elapsedSprints + 1) * millisecondInAWeek))
+    const sprintEnded = new Date(baseSprintDate.getTime() + (2 * (elapsedSprints + 1) * millisecondInAWeek) - (1 * millisecondInADay))
+
+    // sanity check for the last day of the sprint
+    if (sprintEnded.getDay() !== 0) {
+      throw new Error("a sprint should end on a Sunday")
+    }
 
     // reportingMonth is the month in which to do the reporting
     const reportingMonth = findReportingMonth(sprintStarted, sprintEnded)
