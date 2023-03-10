@@ -16,6 +16,68 @@
   // millisecondInAWeek is the number of millisecond in a week
   const millisecondInAWeek = 1000 * 60 * 60 * 24 * 7
 
+  // millisecondInADay is the number of millisecond in a day
+  const millisecondInADay = 1000 * 60 * 60 * 24
+
+  // daysSinceBeginningOfMonth returns the number of days since the beginning of the month
+  const getDaysSinceBeginningOfMonth = function(date) {
+    const startMonthDate = new Date(date.getFullYear(), date.getMonth(), 1)
+    return Math.floor((date.getTime() - startMonthDate.getTime()) / millisecondInADay)
+  }
+
+  // daysUntilEndOfMonth returns the number of days until the end of the month
+  const getDaysUntilEndOfMonth = function(date) {
+    const endMonthDate = new Date(date.getFullYear(), date.getMonth() + 1, 1)
+    return Math.floor((endMonthDate.getTime() - date.getTime()) / millisecondInADay)
+  }
+
+  // sanityCheck automatically runs unit tests
+  const sanityCheck = function() {
+    let got = getDaysUntilEndOfMonth(new Date(2023, 1, 27))
+    if (got !== 2) {
+      throw new Error(`expected 2, got ${got}`)
+    }
+    got = getDaysSinceBeginningOfMonth(new Date(2023, 3, 13))
+    if (got !== 12) {
+      throw new Error(`expected 12, got ${got}`)
+    }
+  }
+
+  // the page must not load if we fail to pass unit tests
+  sanityCheck()
+
+  // formatDate is an helper function to format a date
+  const formatDate = function (d) {
+    d = new Date(d)
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+  }
+
+  // findRelatedReportingMonth takes in input the beginning and the
+  // end of the sprint and returns which month has more days.
+  const findReportingMonth = function(sprintBegin, sprintEnd) {
+    // the easy case is when the two sprints begin and end in the same month
+    if (sprintBegin.getMonth() === sprintEnd.getMonth()) {
+      if (sprintBegin.getFullYear() !== sprintEnd.getFullYear()) {
+        throw new Error("expected to see the same year")
+      }
+      return new Date(sprintBegin.getFullYear(), sprintBegin.getMonth(), 1)
+    }
+
+    // find how many days between the sprint beginning and the end of the month
+    const daysUntilEndOfMonth = getDaysUntilEndOfMonth(sprintBegin)
+
+    // find how many days between the beginning of the month and the sprint end
+    const daysSinceBeginningOfMonth = getDaysSinceBeginningOfMonth(sprintEnd)
+
+    // attribute to the month that has more days
+    if (daysUntilEndOfMonth > daysSinceBeginningOfMonth) {
+      const d = new Date(sprintBegin.getFullYear(), sprintBegin.getMonth(), 1)
+      return d
+    }
+    const d = new Date(sprintEnd.getFullYear(), sprintEnd.getMonth(), 1)
+    return d
+  }
+
   // getSprintInfo returns information on the sprint based on the
   // date passed as argument to this function.
   const getSprintInfo = function (date) {
@@ -52,15 +114,16 @@
     // sprintEnded is when the sprint ended
     const sprintEnded = new Date(baseSprintDate.getTime() + (2 * (elapsedSprints + 1) * millisecondInAWeek))
 
-    console.log(sprintStarted)
+    // reportingMonth is the month in which to do the reporting
+    const reportingMonth = findReportingMonth(sprintStarted, sprintEnded)
 
-    // formatDate is an helper function to format a date
-    const formatDate = function (d) {
-      return new Date(d).toISOString().slice(0, 10)
+    // formatReportingMonth is an helper function to format a reporting month
+    const formatReportingMonth = function (d) {
+      return `${d.getFullYear()}-${d.getMonth() + 1}`
     }
 
     // prepare a string representation of the sprint
-    const sprintString = `Sprint ${sprintNumber} (${formatDate(sprintStarted)} - ${formatDate(sprintEnded)})`
+    const sprintString = `Sprint ${sprintNumber} (${formatDate(sprintStarted)} - ${formatDate(sprintEnded)}) [reporting month: ${formatReportingMonth(reportingMonth)}]`
 
     // return info to the caller
     return {
