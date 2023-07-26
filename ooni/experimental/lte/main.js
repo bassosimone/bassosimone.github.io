@@ -9,36 +9,26 @@
 // from api.ooni.io using explorer URLs as the input.
 //
 
-// Computes the cache key for the localStorage.
-function __cacheKey(reportID, input) {
-    return JSON.stringify({
-        reportID,
-        input
-    })
-}
-
 // Gets a raw JSON from the localStorage cache or from the OONI API.
-async function __cacheGetRawJSON(reportID, input) {
-    const ckey = __cacheKey(reportID, input)
-    const value = sessionStorage.getItem(ckey)
+async function __cacheGetRawJSON(measurementID) {
+    const value = sessionStorage.getItem(measurementID)
     if (value !== null) {
-        console.log(`using previously cached measurement value: ${ckey}`)
+        console.log(`using previously cached measurement value: ${measurementID}`)
         return value
     }
     const url = new URL("https://api.ooni.io/api/v1/measurement_meta")
-    url.searchParams.append("report_id", reportID)
-    url.searchParams.append("input", input)
+    url.searchParams.append("measurement_uid", measurementID)
     url.searchParams.append("full", true)
     const response = await fetch(url)
     const data = await response.text()
-    console.log(`storing entry into the cache: ${ckey}`)
-    sessionStorage.setItem(ckey, data)
+    console.log(`storing entry into the cache: ${measurementID}`)
+    sessionStorage.setItem(measurementID, data)
     return data
 }
 
-// Returns a parsed measurement meta given reportID and input.
-async function cacheGetMeasurementMeta(reportID, input) {
-    const data = await __cacheGetRawJSON(reportID, input)
+// Returns a parsed measurement meta given the measurementID.
+async function cacheGetMeasurementMeta(measurementID) {
+    const data = await __cacheGetRawJSON(measurementID)
     return JSON.parse(data)
 }
 
@@ -582,7 +572,7 @@ function analysisProcessMeasurementMeta(mmeta, analysis) {
     }
 }
 
-// Parses an OONI Explorer URL returning reportID and input.
+// Parses an OONI Explorer URL returning the measurementID.
 function parseExplorerURL(explorerURL) {
     const url = new URL(explorerURL)
     if (url.protocol !== "https:") {
@@ -591,25 +581,18 @@ function parseExplorerURL(explorerURL) {
     if (url.host !== "explorer.ooni.org") {
         throw "URL host must be explorer.ooni.org"
     }
-    const prefix = "/measurement/"
+    const prefix = "/m/"
     if (!url.pathname.startsWith(prefix)) {
         throw `URL path must start with ${prefix}`
     }
-    const reportID = url.pathname.substring(prefix.length)
-    const input = url.searchParams.get("input")
-    if (input === "") {
-        throw "missing input"
-    }
-    return [reportID, input]
+    return url.pathname.substring(prefix.length)
 }
 
 // Top-level analysis algorithm
 async function analysisMain(explorerURL, analysis) {
     try {
-        const explorerTuple = parseExplorerURL(explorerURL)
-        const reportID = explorerTuple[0]
-        const input = explorerTuple[1]
-        const measurementMeta = await cacheGetMeasurementMeta(reportID, input)
+        const measurementID = parseExplorerURL(explorerURL)
+        const measurementMeta = await cacheGetMeasurementMeta(measurementID)
         analysisProcessMeasurementMeta(
             measurementMeta,
             analysis,
