@@ -44,6 +44,7 @@ function __dnsObservationsNewTable() {
     firstRow.push("origin")
     firstRow.push("transaction_id")
     firstRow.push("engine")
+    firstRow.push("query_domain")
     firstRow.push("query_type")
     firstRow.push("resolver_address")
     firstRow.push("failure")
@@ -57,17 +58,18 @@ function __dnsObservationsNewTable() {
 }
 
 // Fills the table for DNS observations
-function __dnsObservationsFillTable(table, tk, name) {
-    const queries = tk[name] || []
+function __dnsObservationsFillTable(table, tk, origin) {
+    const queries = tk[origin] || []
     for (let i = 0; i < queries.length; i += 1) {
         const query = queries[i]
         const answers = query["answers"] || [{}]
         for (let j = 0; j < answers.length; j += 1) {
             const answer = answers[j]
             let row = Array()
-            row.push(name)
+            row.push(origin)
             row.push(query["transaction_id"] || 0)
             row.push(query["engine"])
+            row.push(query["hostname"])
             row.push(query["query_type"])
             row.push(query["resolver_address"])
             row.push(query["failure"])
@@ -101,7 +103,7 @@ function __dnsObservationsFillTable(table, tk, name) {
 }
 
 // Reads the TH response and formats it into the given table
-function __dnsObservationsReadTHResponse(table, tk) {
+function __dnsObservationsReadTHResponse(table, parsedInputURL, tk) {
     const control = tk["control"] || {}
     const dns = control["dns"] || {}
     const failure = dns["failure"]
@@ -112,6 +114,7 @@ function __dnsObservationsReadTHResponse(table, tk) {
         row.push("control")
         row.push(0)
         row.push("th")
+        row.push(parsedInputURL.hostname)
         row.push("ANY")
         row.push("")
         row.push(failure)
@@ -124,11 +127,11 @@ function __dnsObservationsReadTHResponse(table, tk) {
 }
 
 // Dumps all DNS lookups as observations
-function dnsObservationsAnalyzeAndDump(tk, analysis) {
+function dnsObservationsAnalyzeAndDump(parsedInputURL, tk, analysis) {
     let table = __dnsObservationsNewTable()
     __dnsObservationsFillTable(table, tk, "queries")
     __dnsObservationsFillTable(table, tk, "x_dns_late_replies")
-    __dnsObservationsReadTHResponse(table, tk)
+    __dnsObservationsReadTHResponse(table, parsedInputURL, tk)
     analysisAppendTable(analysis, table, "DNS observations")
     const probeObservations = [
         ...(tk["queries"] || []),
@@ -159,8 +162,8 @@ function discoverAddresses(tk) {
 //
 
 // Fills the table for the discovered addresses
-function __discoveredAddrsFillTable(mapping, tk, name) {
-    const queries = tk[name] || []
+function __discoveredAddrsFillTable(mapping, tk, origin) {
+    const queries = tk[origin] || []
     for (let i = 0; i < queries.length; i += 1) {
         const query = queries[i]
         const answers = query["answers"] || []
@@ -185,7 +188,7 @@ function __discoveredAddrsFillTable(mapping, tk, name) {
             if (!entry) {
                 mapping.set(addr, [])
             }
-            mapping.get(addr).push(name)
+            mapping.get(addr).push(origin)
         }
     }
 }
@@ -242,12 +245,12 @@ function __tcpObservationsNewTable() {
 }
 
 // Fills the table for TCP observations
-function __tcpObservationsFillTable(table, tk, name) {
-    const tcpconnect = tk[name] || []
+function __tcpObservationsFillTable(table, tk, origin) {
+    const tcpconnect = tk[origin] || []
     for (let i = 0; i < tcpconnect.length; i += 1) {
         const entry = tcpconnect[i]
         let row = Array()
-        row.push(name)
+        row.push(origin)
         row.push(entry["transaction_id"] || 0)
         let ip = entry["ip"] || ""
         const port = entry["port"] || 0
@@ -293,12 +296,12 @@ function __tlsObservationsNewTable() {
 }
 
 // Fills the table for TLS observations
-function __tlsObservationsFillTable(table, tk, name) {
-    const handshakes = tk[name] || []
+function __tlsObservationsFillTable(table, tk, origin) {
+    const handshakes = tk[origin] || []
     for (let i = 0; i < handshakes.length; i += 1) {
         const entry = handshakes[i]
         let row = new Array()
-        row.push(name)
+        row.push(origin)
         row.push(entry["transaction_id"])
         row.push(entry["network"])
         row.push(entry["address"])
@@ -345,12 +348,12 @@ function __httpObservationsNewTable() {
 }
 
 // Fills the table for HTTP observations
-function __httpObservationsFillTable(table, tk, name) {
-    const requests = tk[name] || []
+function __httpObservationsFillTable(table, tk, origin) {
+    const requests = tk[origin] || []
     for (let i = 0; i < requests.length; i += 1) {
         const entry = requests[i]
         let row = new Array()
-        row.push(name)
+        row.push(origin)
         row.push(entry["transaction_id"])
         row.push(entry["network"])
         row.push(entry["address"])
@@ -508,7 +511,9 @@ function analysisProcessWebConnectivityTestKeys(measurement, tk, analysis) {
     table.push(["probe", "measurement_runtime", measurement["test_runtime"], ""]) // historic misnomer
     analysisAppendTable(analysis, table, "Probe Verdict")
 
-    dnsObservationsAnalyzeAndDump(tk, analysis)
+    const parsedInputURL = new URL(measurement["input"])
+
+    dnsObservationsAnalyzeAndDump(parsedInputURL, tk, analysis)
     discoveredAddrsAnalyzeAndDump(tk, analysis)
     tcpObservationsAnalyzeAndDump(tk, analysis)
     tlsObservationsAnalyzeAndDump(tk, analysis)
