@@ -7,11 +7,8 @@
 
 <body>
   <h1>Sprint Planning</h1>
-  <p>The current sprint is <span id="currentSprint"></span>.</p>
-
-  <p>The next sprints are:</p>
-  <ul id="nextSprints"></ul>
-
+  <div>Note: we changed the attribution of sprints to months on 2023-10-26 (Sprint 103).</div>
+  <div id="nextSprints"></div>
 </body>
 
 <script type="text/javascript">
@@ -21,63 +18,44 @@
   // millisecondInADay is the number of millisecond in a day
   const millisecondInADay = 1000 * 60 * 60 * 24
 
-  // daysSinceBeginningOfMonth returns the number of days since the beginning of the month
-  const getDaysSinceBeginningOfMonth = function(date) {
-    const startMonthDate = new Date(date.getFullYear(), date.getMonth(), 1)
-    return Math.floor((date.getTime() - startMonthDate.getTime()) / millisecondInADay)
-  }
+  // monthNames maps a month index to its english name
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ]
 
-  // daysUntilEndOfMonth returns the number of days until the end of the month
-  const getDaysUntilEndOfMonth = function(date) {
-    const endMonthDate = new Date(date.getFullYear(), date.getMonth() + 1, 1)
-    return Math.floor((endMonthDate.getTime() - date.getTime()) / millisecondInADay)
-  }
-
-  // sanityCheck automatically runs unit tests
-  const sanityCheck = function() {
-    let got = getDaysUntilEndOfMonth(new Date(2023, 1, 27))
-    if (got !== 2) {
-      throw new Error(`expected 2, got ${got}`)
-    }
-    got = getDaysSinceBeginningOfMonth(new Date(2023, 3, 13))
-    if (got !== 12) {
-      throw new Error(`expected 12, got ${got}`)
+  // formatDay formats the day string
+  const formatDay = function (day) {
+    if (day % 10 === 1 && day % 100 !== 11) {
+        return day + "st";
+    } else if (day % 10 === 2 && day % 100 !== 12) {
+        return day + "nd";
+    } else if (day % 10 === 3 && day % 100 !== 13) {
+        return day + "rd";
+    } else {
+        return day + "th";
     }
   }
 
-  // the page must not load if we fail to pass unit tests
-  sanityCheck()
+  // formatTwoDates is an helper function to format two dates in a compact way.
+  const formatTwoDates = function (begin, end) {
+    // Example: 5th - 17th April 2023
+    if (begin.getFullYear() === end.getFullYear() && begin.getMonth() === end.getMonth()) {
+      return `${formatDay(begin.getDate())} - ${formatDay(end.getDate())} ${monthNames[end.getMonth()]} ${end.getFullYear()}`
+    }
 
-  // formatDate is an helper function to format a date
-  const formatDate = function (d) {
-    d = new Date(d)
-    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+    // Example: 27th February - 10th Match 2023
+    if (begin.getFullYear() === end.getFullYear()) {
+      return `${formatDay(begin.getDate())} ${monthNames[begin.getMonth()]} - ${formatDay(end.getDate())} ${monthNames[end.getMonth()]} ${end.getFullYear()}`
+    }
+
+    // Example: 23rd December 2022 - 4th January 2023
+    return `${formatDay(begin.getDate())} ${monthNames[begin.getMonth()]} ${begin.getFullYear()} - ${formatDay(end.getDate())} ${monthNames[end.getMonth()]} ${end.getFullYear()}`
   }
 
-  // findRelatedReportingMonth takes in input the beginning and the
-  // end of the sprint and returns which month has more days.
-  const findReportingMonth = function(sprintBegin, sprintEnd) {
-    // the easy case is when the two sprints begin and end in the same month
-    if (sprintBegin.getMonth() === sprintEnd.getMonth()) {
-      if (sprintBegin.getFullYear() !== sprintEnd.getFullYear()) {
-        throw new Error("expected to see the same year")
-      }
-      return new Date(sprintBegin.getFullYear(), sprintBegin.getMonth(), 1)
-    }
-
-    // find how many days between the sprint beginning and the end of the month
-    const daysUntilEndOfMonth = getDaysUntilEndOfMonth(sprintBegin)
-
-    // find how many days between the beginning of the month and the sprint end
-    const daysSinceBeginningOfMonth = getDaysSinceBeginningOfMonth(sprintEnd)
-
-    // attribute to the month that has more days
-    if (daysUntilEndOfMonth > daysSinceBeginningOfMonth) {
-      const d = new Date(sprintBegin.getFullYear(), sprintBegin.getMonth(), 1)
-      return d
-    }
-    const d = new Date(sprintEnd.getFullYear(), sprintEnd.getMonth(), 1)
-    return d
+  // findRelatedReportingMonth returns the month when the sprint ends. We changed this
+  // rule during spring 103, to more easily write monthly reports.
+  const findReportingMonth = function (sprintBegin, sprintEnd) {
+    return new Date(sprintEnd.getFullYear(), sprintEnd.getMonth(), 1)
   }
 
   // getSprintInfo returns information on the sprint based on the
@@ -126,16 +104,8 @@
       throw new Error("a sprint should end on a Sunday")
     }
 
-    // reportingMonth is the month in which to do the reporting
-    const reportingMonth = findReportingMonth(sprintStarted, sprintEnded)
-
-    // formatReportingMonth is an helper function to format a reporting month
-    const formatReportingMonth = function (d) {
-      return `${d.getFullYear()}-${d.getMonth() + 1}`
-    }
-
     // prepare a string representation of the sprint
-    const sprintString = `Sprint ${sprintNumber} (${formatDate(sprintStarted)} - ${formatDate(sprintEnded)}) [reporting month: ${formatReportingMonth(reportingMonth)}]`
+    const sprintString = `Sprint ${sprintNumber} (${formatTwoDates(sprintStarted, sprintEnded)})`
 
     // return info to the caller
     return {
@@ -146,21 +116,25 @@
     }
   }
 
-  // obtain info about the current sprint
-  const currentSprint = getSprintInfo(new Date())
-
-  // write such info into the document
-  document.getElementById("currentSprint").textContent = currentSprint.stringRepr
-
-  // write information about the next 32 sprints
+  // write information about sprints around this time
   const numSprints = 32
-  for (let idx = 1; idx < numSprints; idx++) {
+  let currentSprintEnd = null
+  for (let idx = -4; idx < numSprints; idx++) {
     const referenceDate = new Date(new Date().getTime() + (2 * idx * millisecondInAWeek))
     const sprintInfo = getSprintInfo(referenceDate)
-    var list = document.getElementById("nextSprints")
-    var e = document.createElement("li")
-    e.appendChild(document.createTextNode(sprintInfo.stringRepr))
-    list.appendChild(e)
+    var destDiv = document.getElementById("nextSprints")
+
+    if (currentSprintEnd === null || currentSprintEnd.getFullYear() !== sprintInfo.ended.getFullYear() ||
+      currentSprintEnd.getMonth() !== sprintInfo.ended.getMonth()) {
+      var title = document.createElement("h2")
+      title.textContent = `${monthNames[sprintInfo.ended.getMonth()]} ${sprintInfo.ended.getFullYear()}`
+      destDiv.appendChild(title)
+      currentSprintEnd = sprintInfo.ended
+    }
+
+    var sprintText = document.createElement("div")
+    sprintText.textContent = `* ${sprintInfo.stringRepr}`
+    destDiv.appendChild(sprintText)
   }
 </script>
 
