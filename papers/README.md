@@ -154,7 +154,7 @@ This is the list of papers I published, last updated on 2024-09-04.
         <strong>Neubot: A Software Tool Performing Distributed Network Measurements to Increase Network Transparency</strong>
     </p>
     <p>Simone Basso</p>
-    <p>Doctoral Theis</p>
+    <p>PhD Thesis, Politecnico di Torino</p>
     <details>
         <summary>Abstract</summary>
         <p>We present Neubot (the network neutrality bot), a network-measurement platform designed to
