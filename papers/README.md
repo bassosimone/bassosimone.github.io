@@ -1,5 +1,10 @@
 # Papers
 
+<!--
+SPDX-License-Identifier: GPL-2.0-only
+Adapted from: https://github.com/NullHypothesis/censorbib
+-->
+
 <style>
 .icon {
     height: 0.8em;
@@ -14,7 +19,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="basso2021measuring.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Measuring DoT/DoH Blocking Using OONI Probe: a Preliminary Study</strong>
     </p>
@@ -45,7 +50,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="kelmenhorst2021web.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Web censorship measurements of HTTP/3 over QUIC</strong>
     </p>
@@ -74,7 +79,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="xue2021throttling.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Throttling Twitter: an emerging censorship technique in Russia</strong>
     </p>
@@ -114,7 +119,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="basso2014measuring.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Measuring DASH Streaming Performance from the End Users Perspective using Neubot</strong>
     </p>
@@ -142,7 +147,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="basso2014neubot.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Neubot: A Software Tool Performing Distributed Network Measurements to Increase Network Transparency</strong>
     </p>
@@ -176,7 +181,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="futia2014neuviz.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>The NeuViz Data Visualization Tool for Visualizing Internet-Measurements Data</strong>
     </p>
@@ -201,7 +206,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="masala2014challenges.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Challenges and Issues on Collecting and Analyzing Large Volumes of Network Data Measurements</strong>
     </p>
@@ -231,7 +236,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="oppici2014universities">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>How Do Universities Use Social Media? An Empirical Survey of Italian Academic Institutions</strong>
     </p>
@@ -262,7 +267,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="basso2013strengthening.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Strengthening Measurements from the Edges: Application-Level Packet Loss Rate Estimation</strong>
     </p>
@@ -288,7 +293,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="futia2013visualizing.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Visualizing Internet-Measurements Data for Research Purposes: the NeuViz Data Visualization Tool</strong>
     </p>
@@ -312,7 +317,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="morando2013free.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Is there such a thing as free government data?</strong>
     </p>
@@ -348,7 +353,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="basso2012estimating.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Estimating Packet Loss Rate in the Access Through Application-Level Measurements</strong>
     </p>
@@ -381,7 +386,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="basso2011hitchhiker.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>The hitchhiker's guide to the Network Neutrality Bot test methodology</strong>
     </p>
@@ -407,7 +412,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="basso2011network.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>The network neutrality bot architecture: a preliminary approach for self-monitoring
         of Internet access QoS</strong>
@@ -438,7 +443,7 @@
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
         <a href="basso2010rationale.pdf">
-            <img src="/assets/pdf-icon.svg">
+            <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>Rationale, Design, and Implementation of the Network Neutrality Bot</strong>
     </p>
