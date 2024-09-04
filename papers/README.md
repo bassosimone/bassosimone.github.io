@@ -2,8 +2,7 @@
 
 <style>
 .icon {
-    height: 1em;
-    margin-right: 0.5em;
+    height: 0.8em;
 }
 </style>
 
