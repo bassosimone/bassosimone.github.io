@@ -125,13 +125,13 @@
     <p>In Proc. of: 2011 IEEE Symposium on Computers and Communications</p>
     <details>
         <summary>Abstract</summary>
-        <p>The “network neutrality bot” (Neubot) is an evolving software architecture for distributed Internet
+        <p>The "network neutrality bot" (Neubot) is an evolving software architecture for distributed Internet
         access quality and network neutrality measurements. The core of this architecture is an open-source agent
         that ordinary users may install on their computers to gain a deeper understanding of their Internet
         connections. The agent periodically monitors the quality of service provided to the user, running
         background active transmission tests that emulate different application-level protocols. The results
         are then collected on a central server and made publicly available to allow constant monitoring of
-        the state of the Internet by interested parties.<p>
+        the state of the Internet by interested parties.</p>
         <p>In this article we describe how we enhanced Neubot architec- ture both to deploy a distributed
         broadband speed test and to allow the development of plug-in transmission tests. In addition, we start
         a preliminary discussion on the results we have collected in the first three months after the first
