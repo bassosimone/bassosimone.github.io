@@ -13,6 +13,9 @@
         <a href="#basso2021measuring">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
+        <a href="basso2021measuring.pdf">
+            <img src="/assets/pdf-icon.svg">
+        </a>
         <strong>Measuring DoT/DoH Blocking Using OONI Probe: a Preliminary Study</strong>
     </p>
     <p>Simone Basso</p>
@@ -41,6 +44,9 @@
         <a href="#kelmenhorst2021web">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
+        <a href="kelmenhorst2021web.pdf">
+            <img src="/assets/pdf-icon.svg">
+        </a>
         <strong>Web censorship measurements of HTTP/3 over QUIC</strong>
     </p>
     <p>Kathrin Elmenhorst, Bertram Schütz, Nils Aschenbruck, Simone Basso</p>
@@ -66,6 +72,9 @@
     <p>
         <a href="#xue2021throttling">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
+        </a>
+        <a href="xue2021throttling.pdf">
+            <img src="/assets/pdf-icon.svg">
         </a>
         <strong>Throttling Twitter: an emerging censorship technique in Russia</strong>
     </p>
@@ -104,6 +113,9 @@
         <a href="#basso2014measuring">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
+        <a href="basso2014measuring.pdf">
+            <img src="/assets/pdf-icon.svg">
+        </a>
         <strong>Measuring DASH Streaming Performance from the End Users Perspective using Neubot</strong>
     </p>
     <p>Simone Basso, Antonio Servetti, Enrico Masala, Juan Carlos De Martin</p>
@@ -128,6 +140,9 @@
     <p>
         <a href="#basso2014neubot">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
+        </a>
+        <a href="basso2014neubot.pdf">
+            <img src="/assets/pdf-icon.svg">
         </a>
         <strong>Neubot: A Software Tool Performing Distributed Network Measurements to Increase Network Transparency</strong>
     </p>
@@ -160,6 +175,9 @@
         <a href="#futia2014neuviz">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
+        <a href="futia2014neuviz.pdf">
+            <img src="/assets/pdf-icon.svg">
+        </a>
         <strong>The NeuViz Data Visualization Tool for Visualizing Internet-Measurements Data</strong>
     </p>
     <p>Giuseppe Futia, Enrico Zimuel, Simone Basso, Juan Carlos De Martin</p>
@@ -181,6 +199,9 @@
     <p>
         <a href="#masala2014challenges">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
+        </a>
+        <a href="masala2014challenges.pdf">
+            <img src="/assets/pdf-icon.svg">
         </a>
         <strong>Challenges and Issues on Collecting and Analyzing Large Volumes of Network Data Measurements</strong>
     </p>
@@ -208,6 +229,9 @@
     <p>
         <a href="#oppici2014universities">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
+        </a>
+        <a href="oppici2014universities">
+            <img src="/assets/pdf-icon.svg">
         </a>
         <strong>How Do Universities Use Social Media? An Empirical Survey of Italian Academic Institutions</strong>
     </p>
@@ -237,6 +261,9 @@
         <a href="#basso2013strengthening">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
+        <a href="basso2013strengthening.pdf">
+            <img src="/assets/pdf-icon.svg">
+        </a>
         <strong>Strengthening Measurements from the Edges: Application-Level Packet Loss Rate Estimation</strong>
     </p>
     <p>Simone Basso, Michela Meo, Juan Carlos De Martin</p>
@@ -257,8 +284,11 @@
 
 <div id="futia2013visualizing">
     <p>
-        <a href="#futia201visualizing">
+        <a href="#futia2013visualizing">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
+        </a>
+        <a href="futia2013visualizing.pdf">
+            <img src="/assets/pdf-icon.svg">
         </a>
         <strong>Visualizing Internet-Measurements Data for Research Purposes: the NeuViz Data Visualization Tool</strong>
     </p>
@@ -280,6 +310,9 @@
     <p>
         <a href="#morando2013free">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
+        </a>
+        <a href="morando2013free.pdf">
+            <img src="/assets/pdf-icon.svg">
         </a>
         <strong>Is there such a thing as free government data?</strong>
     </p>
@@ -314,6 +347,9 @@
         <a href="#basso2012estimating">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
+        <a href="basso2012estimating.pdf">
+            <img src="/assets/pdf-icon.svg">
+        </a>
         <strong>Estimating Packet Loss Rate in the Access Through Application-Level Measurements</strong>
     </p>
     <p>Simone Basso, Michela Meo, Antonio Servetti, Juan Carlos De Martin</p>
@@ -344,6 +380,9 @@
         <a href="#basso2011hitchhiker">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
+        <a href="basso2011hitchhiker.pdf">
+            <img src="/assets/pdf-icon.svg">
+        </a>
         <strong>The hitchhiker's guide to the Network Neutrality Bot test methodology</strong>
     </p>
     <p>Simone Basso, Antonio Servetti, Juan Carlos De Martin</p>
@@ -366,6 +405,9 @@
     <p>
         <a href="#basso2011network">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
+        </a>
+        <a href="basso2011network.pdf">
+            <img src="/assets/pdf-icon.svg">
         </a>
         <strong>The network neutrality bot architecture: a preliminary approach for self-monitoring
         of Internet access QoS</strong>
@@ -394,6 +436,9 @@
     <p>
         <a href="#basso2010rationale">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
+        </a>
+        <a href="basso2010rationale.pdf">
+            <img src="/assets/pdf-icon.svg">
         </a>
         <strong>Rationale, Design, and Implementation of the Network Neutrality Bot</strong>
     </p>
