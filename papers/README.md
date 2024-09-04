@@ -235,7 +235,7 @@ Adapted from: https://github.com/NullHypothesis/censorbib
         <a href="#oppici2014universities">
             <img src="/assets/link-icon.svg" class="icon" alt="[#]">
         </a>
-        <a href="oppici2014universities">
+        <a href="oppici2014universities.pdf">
             <img src="/assets/pdf-icon.svg" class="icon" alt="[pdf]">
         </a>
         <strong>How Do Universities Use Social Media? An Empirical Survey of Italian Academic Institutions</strong>
