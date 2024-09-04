@@ -11,6 +11,8 @@ Adapted from: https://github.com/NullHypothesis/censorbib
 }
 </style>
 
+This is the list of papers I published, last updated on 2024-09-04.
+
 ## 2021
 
 <div id="basso2021measuring">
