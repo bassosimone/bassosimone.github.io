@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secret Santa</title>
+    <style>
+
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        #message {
+            font-size: 40px;
+            text-align: center;
+            max-width: 600px;
+        }
+
+        .error {
+            color: red;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="message"></div>
+
+    <script>
+        // Note: for maximal browser compatibility we are using
+        // `var` instead of `let` and `const` here.
+        //
+        // For the same reason we use `==` instead of `===`.
+        //
+        // This implementation assumes ASCII-only content for
+        // maximum browser compatibility.
+
+        // base64urlDecode takes in input a base64url string and
+        // transforms it into the corresponding raw bytes.
+        function base64urlDecode(str) {
+            str = str.replace(/-/g, "+").replace(/_/g, "/");
+            while (str.length % 4) {
+                str += "=";
+            }
+            return atob(str);
+        }
+
+        // base64ToBytes converts a plain base64 string to bytes.
+        function base64ToBytes(base64) {
+            var binary = atob(base64);
+            var bytes = new Uint8Array(binary.length);
+            for (var idx = 0; idx < binary.length; idx++) {
+                bytes[idx] = binary.charCodeAt(idx);
+            }
+            return bytes;
+        }
+
+        // xorOp performs a byte by byte xor of data and a key.
+        //
+        // This operation can be used both to encrypt and decrypt.
+        function xorOp(data, key) {
+            var result = new Uint8Array(data.length);
+            for (var idx = 0; idx < data.length; idx++) {
+                result[idx] = data[idx] ^ key[idx];
+            }
+            return result;
+        }
+
+        // decodeV1 takes in input a secret per-message key and
+        // a XOR-encoded message and returns the plaintext.
+        function decodeV1(msg) {
+            var key = base64ToBytes(msg.k);
+            var ciphertext = base64ToBytes(msg.c);
+            var plainTextBytes = xorOp(ciphertext, key);
+            var plaintext = "";
+            for (var idx = 0; idx < plainTextBytes.length; idx++) {
+                plaintext += String.fromCharCode(plainTextBytes[idx]);
+            }
+            return plaintext.trim();
+        }
+
+        // decode decodes the base64url fragment into a JSON message
+        // containing both the secret key and the encrypted text.
+        function decode(fragment) {
+            var jsonStr = base64urlDecode(fragment);
+            var msg = JSON.parse(jsonStr);
+            if (msg.v == 1) {
+                return decodeV1(msg);
+            }
+            throw "Unsupported msg version"
+        }
+
+        var fragment = window.location.hash.substring(1);
+        if (fragment) {
+            try {
+                var plaintext = decode(fragment);
+                document.getElementById("message").textContent = plaintext;
+            } catch (err) {
+                var ehtml = "<span class=\"error\">" + err + "</span>";
+                document.getElementById("message").innerHTML = ehtml;
+            }
+        }
+    </script>
+</body>
+</html>
