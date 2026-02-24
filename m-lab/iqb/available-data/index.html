@@ -20,6 +20,33 @@
     margin-top: 0;
     margin-bottom: 1.5rem;
   }
+  #filters {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  #filters label {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #57606a;
+  }
+  #filters select {
+    margin-top: 0.25rem;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.875rem;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    background: #fff;
+    color: #24292f;
+  }
+  #row-count {
+    font-size: 0.8rem;
+    color: #57606a;
+    margin-bottom: 0.75rem;
+  }
   table {
     border-collapse: collapse;
     width: 100%;
@@ -65,6 +92,23 @@
 
 <p id="loading">Loading manifest&hellip;</p>
 <p id="error">Failed to load manifest.</p>
+
+<div id="filters" hidden>
+  <label>Period
+    <select id="filter-period"><option value="">All</option></select>
+  </label>
+  <label>Direction
+    <select id="filter-direction"><option value="">All</option></select>
+  </label>
+  <label>Granularity
+    <select id="filter-granularity"><option value="">All</option></select>
+  </label>
+  <label>File Type
+    <select id="filter-filetype"><option value="">All</option></select>
+  </label>
+</div>
+
+<p id="row-count" hidden></p>
 
 <table id="data-table" hidden>
   <thead>
@@ -119,15 +163,61 @@
     return s.slice(0, 4) + "-" + s.slice(4, 6);
   }
 
+  function populateDropdown(selectId, values) {
+    var sel = document.getElementById(selectId);
+    var sorted = Array.from(values).sort();
+    for (var i = 0; i < sorted.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = sorted[i];
+      opt.textContent = sorted[i];
+      sel.appendChild(opt);
+    }
+  }
+
+  function applyFilters() {
+    var fPeriod = document.getElementById("filter-period").value;
+    var fDirection = document.getElementById("filter-direction").value;
+    var fGranularity = document.getElementById("filter-granularity").value;
+    var fFileType = document.getElementById("filter-filetype").value;
+
+    var rows = document.querySelectorAll("#data-table tbody tr");
+    var visible = 0;
+
+    for (var i = 0; i < rows.length; i++) {
+      var cells = rows[i].cells;
+      var match =
+        (!fPeriod || cells[0].textContent === fPeriod) &&
+        (!fDirection || cells[1].textContent === fDirection) &&
+        (!fGranularity || cells[2].textContent === fGranularity) &&
+        (!fFileType || cells[3].textContent === fFileType);
+
+      rows[i].hidden = !match;
+      if (match) visible++;
+    }
+
+    document.getElementById("row-count").textContent =
+      "Showing " + visible + " of " + rows.length + " entries";
+  }
+
   function render(manifest) {
     var tbody = document.querySelector("#data-table tbody");
     var keys = Object.keys(manifest.files).sort();
+
+    var periods = new Set();
+    var directions = new Set();
+    var granularities = new Set();
+    var fileTypes = new Set();
 
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i];
       var entry = manifest.files[key];
       var parsed = parseKey(key);
       if (!parsed) continue;
+
+      periods.add(parsed.period);
+      directions.add(parsed.direction);
+      granularities.add(parsed.granularity);
+      fileTypes.add(parsed.fileType);
 
       var tr = document.createElement("tr");
 
@@ -156,8 +246,23 @@
       tbody.appendChild(tr);
     }
 
+    populateDropdown("filter-period", periods);
+    populateDropdown("filter-direction", directions);
+    populateDropdown("filter-granularity", granularities);
+    populateDropdown("filter-filetype", fileTypes);
+
+    document.getElementById("filters").hidden = false;
+    document.getElementById("row-count").hidden = false;
     document.getElementById("loading").hidden = true;
     document.getElementById("data-table").hidden = false;
+
+    // Wire up filter change events
+    var selects = document.querySelectorAll("#filters select");
+    for (var k = 0; k < selects.length; k++) {
+      selects[k].addEventListener("change", applyFilters);
+    }
+
+    applyFilters();
   }
 
   fetch("manifest.json")
