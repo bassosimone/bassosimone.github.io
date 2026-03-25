@@ -1,0 +1,426 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Adapted from: https://github.com/bassosimone/2026-03-23-lab
+
+"use strict";
+
+// PacketViewer implements a reusable widget for viewing captured
+// packets with perspective filtering, a packet table, and a
+// collapsible detail pane showing dissected headers.
+class PacketViewer {
+  // Private instance state.
+  #container;
+  #tbody;
+  #statusEl;
+  #detailPane;
+  #perspectiveButtons;
+  #currentAddr = "";
+  #selectedRow = null;
+  #allPackets = [];
+  #traceUrl = "";
+
+  // Default perspectives matching the lab scenario.
+  static #DEFAULT_PERSPECTIVES = [
+    { label: "All", addr: "" },
+    { label: "Client", addr: "130.192.91.211" },
+    { label: "Server", addr: "104.18.26.120" },
+    { label: "DNS polito", addr: "130.192.3.21" },
+    { label: "DNS google", addr: "8.8.8.8" },
+  ];
+
+  constructor(container, options = {}) {
+    // Assign from constructor.
+    this.#container = container;
+    const perspectives = options.perspectives || PacketViewer.#DEFAULT_PERSPECTIVES;
+
+    // Build DOM inside container.
+    container.classList.add("packets-widget");
+
+    // Controls bar.
+    const controls = document.createElement("div");
+    controls.className = "packets-controls";
+    container.appendChild(controls);
+
+    // Perspective buttons.
+    this.#perspectiveButtons = [];
+    for (const p of perspectives) {
+      const btn = document.createElement("button");
+      btn.textContent = p.label;
+      btn.dataset.addr = p.addr;
+      if (p.addr === "") btn.classList.add("active");
+      btn.addEventListener("click", () => this.#onPerspective(btn));
+      controls.appendChild(btn);
+      this.#perspectiveButtons.push(btn);
+    }
+
+    // Separator.
+    const sep = document.createElement("div");
+    sep.className = "packets-separator";
+    controls.appendChild(sep);
+
+    // Download JSON button.
+    const jsonBtn = document.createElement("button");
+    jsonBtn.textContent = "Download JSON";
+    jsonBtn.addEventListener("click", () => {
+      if (this.#traceUrl) window.open(this.#traceUrl);
+    });
+    controls.appendChild(jsonBtn);
+
+    // Status label.
+    this.#statusEl = document.createElement("span");
+    this.#statusEl.className = "packets-status";
+    controls.appendChild(this.#statusEl);
+
+    // List pane with table.
+    const listPane = document.createElement("div");
+    listPane.className = "packets-list-pane";
+    container.appendChild(listPane);
+
+    const table = document.createElement("table");
+    listPane.appendChild(table);
+
+    const thead = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+    for (const col of ["#", "Time", "Event", "Source", "Destination", "Protocol", "Length", "Info"]) {
+      const th = document.createElement("th");
+      th.textContent = col;
+      headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    table.appendChild(tbody);
+    this.#tbody = tbody;
+
+    // Detail pane.
+    this.#detailPane = document.createElement("div");
+    this.#detailPane.className = "packets-detail-pane empty";
+    this.#detailPane.textContent = "Click a packet to see details.";
+    container.appendChild(this.#detailPane);
+
+    // Don't auto-load; caller uses loadTrace(url) to start.
+  }
+
+  // Public: load a trace from a static JSON URL.
+  loadTrace(url) {
+    this.#traceUrl = url;
+    this.#fetchTrace();
+  }
+
+  // Fetches all packets from the trace URL.
+  async #fetchTrace() {
+    if (!this.#traceUrl) {
+      this.#allPackets = [];
+      this.#statusEl.textContent = "no trace loaded";
+      this.#renderPackets([]);
+      return;
+    }
+
+    const resp = await fetch(this.#traceUrl).catch(() => null);
+    if (!resp || !resp.ok) {
+      this.#allPackets = [];
+      this.#statusEl.textContent = resp ? "Error: " + resp.statusText : "Failed to load trace";
+      this.#renderPackets([]);
+      return;
+    }
+
+    const data = await resp.json();
+    this.#allPackets = data.packets || [];
+    this.#applyFilter();
+  }
+
+  // Handles a perspective button click: updates the active
+  // button highlight and filters the packet list client-side.
+  #onPerspective(btn) {
+    this.#currentAddr = btn.dataset.addr;
+
+    for (const b of this.#perspectiveButtons) {
+      b.classList.toggle("active", b === btn);
+    }
+
+    this.#applyFilter();
+  }
+
+  // Filters #allPackets by the current perspective address
+  // and renders the result.
+  #applyFilter() {
+    const addr = this.#currentAddr;
+    const packets = addr
+      ? this.#allPackets.filter(p => p.src === addr || p.dst === addr)
+      : this.#allPackets;
+
+    this.#statusEl.textContent = packets.length + " / " + this.#allPackets.length + " packets";
+    this.#renderPackets(packets);
+  }
+
+  // Rebuilds the table and clears the detail pane.
+  #renderPackets(packets) {
+    // Clear detail pane.
+    this.#detailPane.className = "packets-detail-pane empty";
+    this.#detailPane.textContent = "Click a packet to see details.";
+    this.#selectedRow = null;
+
+    // Clear table.
+    this.#tbody.innerHTML = "";
+
+    if (packets.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 8;
+      td.style.textAlign = "center";
+      td.style.color = "#999";
+      td.style.padding = "20px";
+      td.textContent = "No packets captured.";
+      tr.appendChild(td);
+      this.#tbody.appendChild(tr);
+      return;
+    }
+
+    for (const pkt of packets) {
+      const tr = document.createElement("tr");
+
+      // Color by event, RST overrides.
+      if (pkt.flags && pkt.flags.includes("RST")) {
+        tr.className = "rst";
+      } else {
+        tr.className = pkt.event;
+      }
+
+      const cells = [
+        pkt.number, pkt.time, pkt.event, pkt.src,
+        pkt.dst, pkt.protocol, pkt.length, pkt.info,
+      ];
+      for (const value of cells) {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      }
+
+      tr.addEventListener("click", () => {
+        if (this.#selectedRow) this.#selectedRow.classList.remove("selected");
+        tr.classList.add("selected");
+        this.#selectedRow = tr;
+        this.#showDetail(pkt);
+      });
+
+      this.#tbody.appendChild(tr);
+    }
+  }
+
+  // Populates the detail pane with collapsible header sections
+  // for the selected packet.
+  #showDetail(pkt) {
+    this.#detailPane.className = "packets-detail-pane";
+    this.#detailPane.innerHTML = "";
+
+    // IP section.
+    if (pkt.detail && pkt.detail.ip) {
+      const ip = pkt.detail.ip;
+      this.#detailPane.appendChild(this.#makeSection(
+        "Internet Protocol Version " + ip.version +
+        ", Src: " + ip.src + ", Dst: " + ip.dst,
+        [
+          ["Version", ip.version],
+          ["Header Length", ip.ihl * 4 + " bytes (" + ip.ihl + ")"],
+          ["Type of Service", "0x" + ip.tos.toString(16).padStart(2, "0")],
+          ["Total Length", ip.total_length],
+          ["Identification", "0x" + ip.id.toString(16).padStart(4, "0") + " (" + ip.id + ")"],
+          ["Don't Fragment", ip.flag_df ? "Set" : "Not set"],
+          ["More Fragments", ip.flag_mf ? "Set" : "Not set"],
+          ["Fragment Offset", ip.frag_offset],
+          ["Time to Live", ip.ttl],
+          ["Protocol", PacketViewer.#protocolName(ip.protocol) + " (" + ip.protocol + ")"],
+          ["Header Checksum", "0x" + ip.checksum.toString(16).padStart(4, "0")],
+          ["Source Address", ip.src],
+          ["Destination Address", ip.dst],
+        ]
+      ));
+    }
+
+    // TCP section.
+    if (pkt.detail && pkt.detail.tcp) {
+      const tcp = pkt.detail.tcp;
+
+      const flags = [];
+      if (tcp.flag_syn) flags.push("SYN");
+      if (tcp.flag_ack) flags.push("ACK");
+      if (tcp.flag_fin) flags.push("FIN");
+      if (tcp.flag_rst) flags.push("RST");
+      if (tcp.flag_psh) flags.push("PSH");
+      if (tcp.flag_urg) flags.push("URG");
+
+      this.#detailPane.appendChild(this.#makeSection(
+        "Transmission Control Protocol, Src Port: " + tcp.src_port +
+        ", Dst Port: " + tcp.dst_port,
+        [
+          ["Source Port", tcp.src_port],
+          ["Destination Port", tcp.dst_port],
+          ["Sequence Number", tcp.seq],
+          ["Acknowledgment Number", tcp.ack],
+          ["Data Offset", tcp.data_offset * 4 + " bytes (" + tcp.data_offset + ")"],
+          ["Flags", flags.join(", ") || "(none)"],
+          ["Window", tcp.window],
+          ["Checksum", "0x" + tcp.checksum.toString(16).padStart(4, "0")],
+          ["Urgent Pointer", tcp.urgent],
+          ["Payload Length", tcp.payload_length],
+        ]
+      ));
+    }
+
+    // UDP section.
+    if (pkt.detail && pkt.detail.udp) {
+      const udp = pkt.detail.udp;
+      this.#detailPane.appendChild(this.#makeSection(
+        "User Datagram Protocol, Src Port: " + udp.src_port +
+        ", Dst Port: " + udp.dst_port,
+        [
+          ["Source Port", udp.src_port],
+          ["Destination Port", udp.dst_port],
+          ["Length", udp.length],
+          ["Checksum", "0x" + udp.checksum.toString(16).padStart(4, "0")],
+          ["Payload Length", udp.payload_length],
+        ]
+      ));
+    }
+
+    // HTTP section.
+    if (pkt.detail && pkt.detail.http) {
+      const http = pkt.detail.http;
+
+      const rows = [["First Line", http.first_line]];
+      for (const hdr of http.headers) {
+        const colon = hdr.indexOf(":");
+        if (colon !== -1) {
+          rows.push([hdr.slice(0, colon).trim(), hdr.slice(colon + 1).trim()]);
+        } else {
+          rows.push(["Header", hdr]);
+        }
+      }
+
+      this.#detailPane.appendChild(this.#makeSection(
+        "Hypertext Transfer Protocol", rows
+      ));
+    }
+
+    // TLS section.
+    if (pkt.detail && pkt.detail.tls) {
+      const tls = pkt.detail.tls;
+
+      // Record header.
+      if (tls.record) {
+        this.#detailPane.appendChild(this.#makeSection(
+          "TLS Record", [
+            ["Content Type", tls.record.content_type],
+            ["Version", tls.record.version],
+            ["Length", tls.record.length],
+          ]
+        ));
+      }
+
+      // Handshake / ClientHello.
+      if (tls.handshake) {
+        const hs = tls.handshake;
+
+        const rows = [
+          ["Handshake Type", hs.type],
+          ["Version", hs.version],
+          ["Random", hs.random_length + " bytes"],
+          ["Session ID", hs.session_id_length + " bytes"],
+          ["Cipher Suites", hs.cipher_suites_count + " suites"],
+          ["Compression Methods", hs.compression_methods_count + " methods"],
+        ];
+
+        this.#detailPane.appendChild(this.#makeSection(
+          "TLS Handshake: " + hs.type, rows
+        ));
+
+        // Extensions list.
+        if (hs.extensions && hs.extensions.length > 0) {
+          const extRows = [];
+          for (const ext of hs.extensions) {
+            const label = ext.name + " (" + ext.type + ")";
+            const value = ext.value || (ext.length + " bytes");
+            extRows.push([label, value]);
+          }
+
+          this.#detailPane.appendChild(this.#makeSection(
+            "TLS Extensions (" + hs.extensions.length + ")", extRows
+          ));
+        }
+      }
+    }
+
+    // DNS section.
+    if (pkt.detail && pkt.detail.dns) {
+      const d = pkt.detail.dns;
+      const kind = d.qr ? "response" : "query";
+
+      const rows = [
+        ["Transaction ID", "0x" + d.transaction_id.toString(16).padStart(4, "0")],
+        ["Type", kind],
+        ["Opcode", d.opcode],
+      ];
+
+      if (d.qr) {
+        rows.push(["Response Code", d.rcode]);
+      }
+
+      for (const q of d.questions) {
+        rows.push(["Query", q.name + " " + q.type]);
+      }
+
+      for (const a of (d.answers || [])) {
+        rows.push(["Answer", a]);
+      }
+
+      this.#detailPane.appendChild(this.#makeSection(
+        "Domain Name System (" + kind + ")", rows
+      ));
+    }
+  }
+
+  // Builds a collapsible detail section with a title header
+  // and a list of label/value rows.
+  #makeSection(title, rows) {
+    const section = document.createElement("div");
+    section.className = "packets-detail-section";
+
+    const header = document.createElement("div");
+    header.className = "packets-detail-header";
+    header.textContent = title;
+
+    const body = document.createElement("div");
+    body.className = "packets-detail-body";
+
+    for (const [label, value] of rows) {
+      const row = document.createElement("div");
+      row.className = "packets-detail-row";
+
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "packets-detail-label";
+      labelSpan.textContent = label + ":";
+      row.appendChild(labelSpan);
+      row.appendChild(document.createTextNode(" " + String(value)));
+
+      body.appendChild(row);
+    }
+
+    header.addEventListener("click", () => {
+      header.classList.toggle("open");
+      body.classList.toggle("open");
+    });
+
+    section.appendChild(header);
+    section.appendChild(body);
+    return section;
+  }
+
+  // Maps an IP protocol number to its name.
+  static #protocolName(num) {
+    switch (num) {
+      case 6: return "TCP";
+      case 17: return "UDP";
+      default: return "Unknown";
+    }
+  }
+}

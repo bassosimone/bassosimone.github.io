@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Adapted from: https://github.com/bassosimone/2026-03-23-lab -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TCP Pipeline Filling</title>
+<link rel="stylesheet" href="topology.css">
+<link rel="stylesheet" href="packets.css">
+
+<style>
+  body {
+    margin: 0;
+    background: #808080;
+    font-family: 'Ubuntu Mono', 'Courier New', monospace;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Header bar with trace selector */
+  #header {
+    display: flex;
+    align-items: center;
+    background: #444;
+    padding: 8px 16px;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  #header h1 {
+    margin: 0;
+    font-size: 18px;
+    color: #fff;
+    white-space: nowrap;
+  }
+  #header label {
+    color: #ccc;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+  #header select {
+    font-family: inherit;
+    font-size: 14px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    border: 1px solid #888;
+  }
+
+  /* Tab bar */
+  #tabs {
+    display: flex;
+    background: #555;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  #tabs button {
+    font-family: inherit;
+    font-size: 16px;
+    padding: 10px 24px;
+    border: none;
+    background: #555;
+    color: #ccc;
+    cursor: pointer;
+  }
+  #tabs button:hover {
+    background: #666;
+    color: #fff;
+  }
+  #tabs button.active {
+    background: #808080;
+    color: #fff;
+    font-weight: bold;
+  }
+
+  /* Tab content */
+  .tab-content {
+    flex: 1;
+    display: none;
+    padding: 20px;
+    overflow: hidden;
+  }
+  .tab-content.visible {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #tab-about.visible {
+    overflow-y: auto;
+    align-items: flex-start;
+  }
+  #tab-about .about-widget {
+    width: 95vw;
+    background: #fff;
+    border-radius: 6px;
+    padding: 30px 40px;
+    box-sizing: border-box;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #333;
+  }
+  #tab-about .about-widget h2 { margin-top: 0; color: #222; }
+  #tab-about .about-widget h3 { color: #444; margin-bottom: 8px; }
+  #tab-about .about-widget a { color: #2a7ae2; }
+  #tab-about .about-widget dt { font-weight: bold; margin-top: 8px; }
+  #tab-about .about-widget dd { margin-left: 20px; margin-bottom: 4px; }
+
+  #tab-network .topology-widget {
+    width: 95vw;
+    height: calc(100vh - 140px);
+  }
+  #tab-packets .packets-widget {
+    width: 95vw;
+    height: calc(100vh - 140px);
+  }
+</style>
+
+</head>
+<body>
+
+<div id="header">
+  <h1>TCP Pipeline Filling</h1>
+</div>
+
+<div id="tabs">
+  <button class="active" data-tab="about">About</button>
+  <button data-tab="network">Network</button>
+  <button data-tab="packets">Packets</button>
+</div>
+
+<div id="tab-about" class="tab-content visible">
+  <div class="about-widget">
+    <h2>TCP Pipeline Filling</h2>
+    <p>
+      This demo visualizes how TCP fills a network pipe, using
+      packet-level traces captured from a
+      <a href="https://github.com/google/gvisor">gVisor</a> userspace
+      network simulation.
+    </p>
+
+    <h3>Network tab</h3>
+    <p>
+      Shows the network topology with animated packet replay. Each
+      packet event highlights the relevant network link and plays an
+      audio tone. Step through packets one at a time, or press fast
+      forward to replay the entire trace with real inter-packet timing
+      (scaled 50x).
+    </p>
+
+    <h3>Audio sonification</h3>
+    <p>
+      Each network node is mapped to a pentatonic note (C4, D4, E4, G4).
+      Waveforms vary by packet type:
+    </p>
+    <dl>
+      <dt>Sine (smooth)</dt>
+      <dd>Data packets</dd>
+      <dt>Triangle (soft)</dt>
+      <dd>Control packets (SYN, FIN, ACK-only)</dd>
+      <dt>Sawtooth (harsh)</dt>
+      <dd>RST packets</dd>
+    </dl>
+    <p>
+      "Entered" events play at the base frequency; "delivered" events
+      play one octave higher. The result is an audible picture of the
+      connection: the slow handshake tones followed by a rapid cascade
+      as the pipe fills.
+    </p>
+
+    <h3>Packets tab</h3>
+    <p>
+      A sortable packet table with Wireshark-style protocol dissection.
+      Use the perspective buttons to filter by network node. Click any
+      packet to see its decoded headers (IP, TCP, UDP, HTTP, TLS, DNS).
+    </p>
+
+    <h3>Source</h3>
+    <p>
+      Extracted from the
+      <a href="https://github.com/bassosimone/2026-03-23-lab">Censorship Lab</a>,
+      a Go backend + vanilla JS frontend that runs gVisor TCP/IP
+      simulations with a configurable DPI engine.
+    </p>
+  </div>
+</div>
+
+<div id="tab-network" class="tab-content">
+  <div id="widget-topology"></div>
+</div>
+
+<div id="tab-packets" class="tab-content">
+  <div id="widget-packets"></div>
+</div>
+
+<script src="topology.js"></script>
+<script src="packets.js"></script>
+
+<script>
+"use strict";
+
+// Create widgets (they don't auto-load).
+const topology = new TopologyMap(document.getElementById("widget-topology"));
+const packets = new PacketViewer(document.getElementById("widget-packets"));
+
+// Tab switching.
+const tabButtons = document.querySelectorAll("#tabs button");
+const tabPanes = document.querySelectorAll(".tab-content");
+
+for (const btn of tabButtons) {
+  btn.addEventListener("click", () => {
+    const target = btn.dataset.tab;
+    for (const b of tabButtons) {
+      b.classList.toggle("active", b === btn);
+    }
+    for (const pane of tabPanes) {
+      pane.classList.toggle("visible", pane.id === "tab-" + target);
+    }
+  });
+}
+
+// Load trace.
+topology.loadTrace("traces/default.json");
+packets.loadTrace("traces/default.json");
+</script>
+
+</body>
+</html>

@@ -1,0 +1,546 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Adapted from: https://github.com/bassosimone/2026-03-23-lab
+
+"use strict";
+
+/**
+ * TopologyMap renders an SVG network topology diagram and provides
+ * step-through packet replay. Each node can display multiple domain
+ * names and IP addresses. Stepping through packet events highlights
+ * the edge connecting the relevant node to the internet cloud.
+ */
+class TopologyMap {
+  #container;
+  #edgeByIP = new Map();
+  #allEdges = [];
+  #packets = [];
+  #cursor = -1;
+  #statusEl;
+  #infoEl;
+  #cloudPath;
+  #arrow;
+  #traceUrl = "";
+  #playBtn;
+  #playing = false;
+  #playTimer = null;
+  #audioCtx = null;
+
+  // Pentatonic note frequencies (Hz) assigned to each node.
+  // C4=262, D4=294, E4=330, G4=392.
+  static #NOTE_BY_IP = new Map([
+    ["130.192.91.211", 262],   // client → C4
+    ["130.192.3.21", 294],     // giove.polito.it → D4
+    ["8.8.8.8", 330],          // dns.google → E4
+    ["8.8.4.4", 330],          // dns.google → E4
+    ["104.18.26.120", 392],    // www.example.com → G4
+    ["104.18.27.120", 392],    // www.example.com → G4
+  ]);
+
+  static #SVG_NS = "http://www.w3.org/2000/svg";
+  static #NODE_W = 260;
+  static #NODE_R = 8;
+  static #LINE_H = 18;
+  static #PAD_TOP = 14;
+  static #PAD_BOT = 12;
+  static #GAP = 24;
+  static #CLOUD_CX = 420;
+  static #CLOUD_EDGE = 75;
+
+  // Cloud path centered at origin; positioned via transform.
+  static #CLOUD_PATH =
+    "M -60,50 " +
+    "C -85,50 -92,20 -72,3 " +
+    "C -82,-25 -50,-37 -25,-20 " +
+    "C -12,-49 18,-49 32,-20 " +
+    "C 48,-37 80,-25 68,3 " +
+    "C 90,20 85,50 60,50 " +
+    "Z";
+
+  static #CLIENT = {
+    lines: [
+      { text: "shelob.polito.it", bold: true },
+      { text: "130.192.91.211", bold: false },
+    ],
+    ips: ["130.192.91.211"],
+    x: 20, fill: "#e8f5e9", stroke: "#4caf50",
+  };
+
+  static #SERVERS = [
+    {
+      lines: [
+        { text: "giove.polito.it", bold: true },
+        { text: "130.192.3.21", bold: false },
+      ],
+      ips: ["130.192.3.21"],
+      fill: "#e8f5e9", stroke: "#4caf50",
+    },
+    {
+      lines: [
+        { text: "dns.google, dns.google.com", bold: true },
+        { text: "8.8.8.8, 8.8.4.4", bold: false },
+      ],
+      ips: ["8.8.8.8", "8.8.4.4"],
+      fill: "#fff8e1", stroke: "#ffc107",
+    },
+    {
+      lines: [
+        { text: "www.example.com, example.com", bold: true },
+        { text: "www.example.org, example.org", bold: true },
+        { text: "104.18.26.120, 104.18.27.120", bold: false },
+      ],
+      ips: ["104.18.26.120", "104.18.27.120"],
+      fill: "#e3f2fd", stroke: "#2196f3",
+    },
+  ];
+
+  constructor(container) {
+    this.#container = container;
+    container.classList.add("topology-widget");
+    this.#build();
+  }
+
+  #nodeHeight(def) {
+    return TopologyMap.#PAD_TOP + def.lines.length * TopologyMap.#LINE_H + TopologyMap.#PAD_BOT;
+  }
+
+  // ── Build ──────────────────────────────────────────────
+
+  #build() {
+    const nw = TopologyMap.#NODE_W;
+    const gap = TopologyMap.#GAP;
+    const servers = TopologyMap.#SERVERS;
+    const client = TopologyMap.#CLIENT;
+    const cloudCx = TopologyMap.#CLOUD_CX;
+    const cloudEdge = TopologyMap.#CLOUD_EDGE;
+    const serverX = 680;
+
+    // Compute server node heights and vertical positions.
+    const heights = servers.map(s => this.#nodeHeight(s));
+    const totalH = heights.reduce((sum, h) => sum + h, 0) + gap * (heights.length - 1);
+    const margin = 40;
+    const viewH = totalH + 2 * margin;
+
+    const serverYs = [];
+    let y = margin;
+    for (const h of heights) {
+      serverYs.push(y);
+      y += h + gap;
+    }
+
+    // Cloud and client are vertically centered on the server column.
+    const cloudCy = margin + totalH / 2;
+    const clientH = this.#nodeHeight(client);
+    const clientY = cloudCy - clientH / 2;
+
+    // SVG dimensions.
+    const viewW = serverX + nw + 20;
+    const svg = this.#svgEl("svg", {
+      viewBox: `0 0 ${viewW} ${viewH}`,
+      class: "topology-svg",
+    });
+
+    // Edges (behind everything). Store references for highlighting.
+    // Each edge records coordinates and whether (x2,y2) is the cloud end.
+    const clientEdge = this.#edge(svg,
+      client.x + nw, clientY + clientH / 2,
+      cloudCx - cloudEdge, cloudCy, true);
+    for (const ip of client.ips) {
+      this.#edgeByIP.set(ip, clientEdge);
+    }
+
+    for (let i = 0; i < servers.length; i++) {
+      const sCy = serverYs[i] + heights[i] / 2;
+      const edge = this.#edge(svg, cloudCx + cloudEdge, cloudCy, serverX, sCy, false);
+      for (const ip of servers[i].ips) {
+        this.#edgeByIP.set(ip, edge);
+      }
+    }
+
+    // Cloud shape.
+    const cloudG = this.#svgEl("g", {
+      transform: `translate(${cloudCx},${cloudCy})`,
+    });
+    this.#cloudPath = this.#svgEl("path", {
+      d: TopologyMap.#CLOUD_PATH,
+      fill: "#f5f5f5", stroke: "#999",
+      "stroke-width": 2, "stroke-dasharray": "6,4",
+    });
+    cloudG.appendChild(this.#cloudPath);
+    const label = this.#svgEl("text", {
+      x: 0, y: 5,
+      "text-anchor": "middle", "font-size": 16, fill: "#555",
+    });
+    label.textContent = "Internet";
+    cloudG.appendChild(label);
+    svg.appendChild(cloudG);
+
+    // Client node.
+    this.#node(svg, { ...client, y: clientY });
+
+    // Server nodes.
+    for (let i = 0; i < servers.length; i++) {
+      this.#node(svg, { ...servers[i], x: serverX, y: serverYs[i] });
+    }
+
+    // Directional arrow (on top of everything, initially hidden).
+    this.#arrow = this.#svgEl("polygon", {
+      points: "0,-7 14,0 0,7",
+      fill: "#4caf50",
+      visibility: "hidden",
+    });
+    svg.appendChild(this.#arrow);
+
+    this.#container.appendChild(svg);
+
+    // Control bar below the SVG.
+    this.#buildControls();
+
+    // Don't auto-load; caller uses loadTrace(url) to start.
+  }
+
+  // Public: load a trace from a static JSON URL.
+  loadTrace(url) {
+    this.#traceUrl = url;
+    this.#loadPackets();
+  }
+
+  #buildControls() {
+    const bar = document.createElement("div");
+    bar.className = "topology-controls";
+
+    bar.appendChild(this.#btn("\u21bb", "Reload trace", () => this.#loadPackets()));
+    bar.appendChild(this.#sep());
+    bar.appendChild(this.#btn("|\u25c0", "First", () => { this.#pause(); this.#goTo(0); }));
+    bar.appendChild(this.#btn("\u25c0", "Previous", () => this.#step(-1)));
+    bar.appendChild(this.#btn("\u25b6", "Next", () => this.#step(1)));
+    bar.appendChild(this.#btn("\u25b6|", "Last", () => { this.#pause(); this.#goTo(this.#packets.length - 1); }));
+    bar.appendChild(this.#sep());
+    this.#playBtn = this.#btn("\u23e9", "Fast forward", () => this.#togglePlay());
+    bar.appendChild(this.#playBtn);
+
+    this.#statusEl = document.createElement("span");
+    this.#statusEl.className = "topology-status";
+    bar.appendChild(this.#statusEl);
+
+    this.#container.appendChild(bar);
+
+    // Packet detail line below the controls.
+    this.#infoEl = document.createElement("div");
+    this.#infoEl.className = "topology-info";
+    this.#container.appendChild(this.#infoEl);
+
+    this.#updateDisplay();
+  }
+
+  // ── Packet loading & stepping ──────────────────────────
+
+  async #loadPackets() {
+    this.#pause();
+    if (!this.#traceUrl) {
+      this.#packets = [];
+      this.#cursor = -1;
+      this.#resetEdges();
+      this.#updateDisplay();
+      return;
+    }
+
+    const resp = await fetch(this.#traceUrl).catch(() => null);
+    if (resp && resp.ok) {
+      const data = await resp.json();
+      this.#packets = data.packets || [];
+    } else {
+      this.#packets = [];
+    }
+
+    this.#cursor = -1;
+    this.#resetEdges();
+    this.#updateDisplay();
+  }
+
+  // ── Playback ────────────────────────────────────────────
+
+  #togglePlay() {
+    if (this.#playing) {
+      this.#pause();
+    } else {
+      this.#play();
+    }
+  }
+
+  #play() {
+    if (this.#packets.length === 0) return;
+    this.#playing = true;
+    this.#playBtn.textContent = "\u23f8";
+    this.#playBtn.title = "Pause fast forward";
+
+    // If at the end or not started, restart from the beginning.
+    if (this.#cursor < 0 || this.#cursor >= this.#packets.length - 1) {
+      this.#goTo(0);
+    }
+    this.#scheduleNext();
+  }
+
+  #pause() {
+    this.#playing = false;
+    this.#playBtn.textContent = "\u23e9";
+    this.#playBtn.title = "Fast forward";
+    if (this.#playTimer) {
+      clearTimeout(this.#playTimer);
+      this.#playTimer = null;
+    }
+  }
+
+  #scheduleNext() {
+    if (!this.#playing) return;
+    if (this.#cursor >= this.#packets.length - 1) {
+      this.#pause();
+      return;
+    }
+
+    // Compute delay from actual inter-packet timing.
+    // Scale 50x so the ~10ms simulation delay becomes ~500ms on screen.
+    // Only enforce a small minimum so zero-delta events are still visible.
+    const curr = this.#packets[this.#cursor];
+    const next = this.#packets[this.#cursor + 1];
+    const deltaMicros = this.#parseTimeMicros(next.time) - this.#parseTimeMicros(curr.time);
+    const scaledMs = (deltaMicros / 1000) * 50;
+    const delay = scaledMs;
+
+    this.#playTimer = setTimeout(() => {
+      this.#playTimer = null;
+      this.#goTo(this.#cursor + 1);
+      this.#scheduleNext();
+    }, delay);
+  }
+
+  // ── Sound ───────────────────────────────────────────────
+
+  #playTone(pkt) {
+    // Create AudioContext lazily (requires a prior user gesture).
+    if (!this.#audioCtx) {
+      this.#audioCtx = new AudioContext();
+    }
+
+    // Determine which node is active and its base frequency.
+    const ip = pkt.event === "entered" ? pkt.src : pkt.dst;
+    const baseFreq = TopologyMap.#NOTE_BY_IP.get(ip);
+    if (!baseFreq) return;
+
+    // "delivered" plays one octave higher than "entered".
+    const freq = pkt.event === "delivered" ? baseFreq * 2 : baseFreq;
+
+    // Waveform: sawtooth for RST (harsh), triangle for control packets
+    // (SYN/FIN/ACK-only), sine for everything else (smooth).
+    let waveform = "sine";
+    if (pkt.flags && pkt.flags.includes("RST")) {
+      waveform = "sawtooth";
+    } else if (pkt.protocol === "TCP" && pkt.length <= 44) {
+      // ~44 bytes = IP(20) + TCP(20-24) with no payload = control packet.
+      waveform = "triangle";
+    }
+
+    const ctx = this.#audioCtx;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = waveform;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.15);
+  }
+
+  // ── Manual stepping ────────────────────────────────────
+
+  #step(delta) {
+    this.#pause();
+    const next = this.#cursor + delta;
+    if (next < -1 || next >= this.#packets.length) return;
+    if (next === -1) {
+      this.#cursor = -1;
+      this.#resetEdges();
+      this.#updateDisplay();
+      return;
+    }
+    this.#goTo(next);
+  }
+
+  #goTo(index) {
+    if (this.#packets.length === 0) return;
+    if (index < 0 || index >= this.#packets.length) return;
+    this.#cursor = index;
+    this.#resetEdges();
+
+    const pkt = this.#packets[index];
+
+    // Determine which node's edge to highlight.
+    // "entered" = packet leaving the source node.
+    // "delivered" = packet arriving at the destination node.
+    const ip = pkt.event === "entered" ? pkt.src : pkt.dst;
+    const edge = this.#edgeByIP.get(ip);
+    if (edge) {
+      let color = pkt.event === "entered" ? "#4caf50" : "#2196f3";
+      if (pkt.flags && pkt.flags.includes("RST")) {
+        color = "#e53935";
+      }
+      edge.line.setAttribute("stroke", color);
+      edge.line.setAttribute("stroke-width", "4");
+      this.#showArrow(edge, pkt.event === "entered", color);
+    }
+
+    this.#playTone(pkt);
+    this.#updateDisplay();
+  }
+
+  #resetEdges() {
+    for (const edge of this.#allEdges) {
+      edge.line.setAttribute("stroke", "#bbb");
+      edge.line.setAttribute("stroke-width", "2");
+    }
+    this.#arrow.setAttribute("visibility", "hidden");
+  }
+
+  // Position and show the directional arrow at the midpoint of an edge.
+  #showArrow(edge, towardCloud, color) {
+    const mx = (edge.x1 + edge.x2) / 2;
+    const my = (edge.y1 + edge.y2) / 2;
+
+    // Compute direction of packet travel.
+    // "entered" = toward cloud, "delivered" = away from cloud.
+    // cloudIsEnd tells us which end of the line is the cloud.
+    let dx, dy;
+    if (towardCloud === edge.cloudIsEnd) {
+      dx = edge.x2 - edge.x1;
+      dy = edge.y2 - edge.y1;
+    } else {
+      dx = edge.x1 - edge.x2;
+      dy = edge.y1 - edge.y2;
+    }
+
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    this.#arrow.setAttribute("transform", `translate(${mx},${my}) rotate(${angle})`);
+    this.#arrow.setAttribute("fill", color);
+    this.#arrow.setAttribute("visibility", "visible");
+  }
+
+  #updateDisplay() {
+    const total = this.#packets.length;
+    if (total === 0) {
+      this.#statusEl.textContent = "no packets";
+      this.#infoEl.textContent = "";
+      return;
+    }
+
+    if (this.#cursor < 0) {
+      this.#statusEl.textContent = `\u2013 / ${total}`;
+      this.#infoEl.textContent = "press \u25b6 to step through";
+      return;
+    }
+
+    this.#statusEl.textContent = `${this.#cursor + 1} / ${total}`;
+    const pkt = this.#packets[this.#cursor];
+
+    // Show absolute time (truncated to ms) and delta from previous event.
+    const timeMs = pkt.time.slice(0, 12); // "HH:MM:SS.mmm"
+    let delta = "";
+    if (this.#cursor > 0) {
+      const prev = this.#packets[this.#cursor - 1];
+      const dt = this.#parseTimeMicros(pkt.time) - this.#parseTimeMicros(prev.time);
+      delta = ` (\u0394${this.#formatDelta(dt)})`;
+    }
+
+    const line1 = `${timeMs}${delta}  #${pkt.number} ${pkt.event}  ${pkt.protocol}  ${pkt.src} \u2192 ${pkt.dst}`;
+    const line2 = pkt.info;
+    this.#infoEl.textContent = "";
+    this.#infoEl.appendChild(document.createTextNode(line1));
+    this.#infoEl.appendChild(document.createElement("br"));
+    this.#infoEl.appendChild(document.createTextNode(line2));
+  }
+
+  // Parse "HH:MM:SS.uuuuuu" into total microseconds since midnight.
+  #parseTimeMicros(timeStr) {
+    const [hms, us] = timeStr.split(".");
+    const [h, m, s] = hms.split(":").map(Number);
+    return ((h * 3600 + m * 60 + s) * 1000000) + Number(us);
+  }
+
+  // Format a duration in microseconds as a human-readable string.
+  #formatDelta(us) {
+    if (us < 0) return "0";
+    if (us < 1000) return `${us}\u00b5s`;
+    if (us < 1000000) return `${(us / 1000).toFixed(1)}ms`;
+    return `${(us / 1000000).toFixed(3)}s`;
+  }
+
+  // ── SVG helpers ────────────────────────────────────────
+
+  #node(svg, def) {
+    const nw = TopologyMap.#NODE_W;
+    const nr = TopologyMap.#NODE_R;
+    const lineH = TopologyMap.#LINE_H;
+    const padTop = TopologyMap.#PAD_TOP;
+    const h = this.#nodeHeight(def);
+
+    const g = this.#svgEl("g", { "data-ips": def.ips.join(",") });
+
+    g.appendChild(this.#svgEl("rect", {
+      x: def.x, y: def.y, width: nw, height: h,
+      rx: nr, ry: nr,
+      fill: def.fill, stroke: def.stroke, "stroke-width": 2,
+    }));
+
+    for (let i = 0; i < def.lines.length; i++) {
+      const line = def.lines[i];
+      const ty = def.y + padTop + i * lineH + 13;
+      const text = this.#svgEl("text", {
+        x: def.x + nw / 2, y: ty,
+        "text-anchor": "middle",
+        "font-size": line.bold ? 13 : 12,
+        "font-weight": line.bold ? "bold" : "normal",
+        fill: line.bold ? "#333" : "#666",
+      });
+      text.textContent = line.text;
+      g.appendChild(text);
+    }
+
+    svg.appendChild(g);
+  }
+
+  #edge(svg, x1, y1, x2, y2, cloudIsEnd) {
+    const line = this.#svgEl("line", {
+      x1, y1, x2, y2,
+      stroke: "#bbb", "stroke-width": 2,
+    });
+    svg.appendChild(line);
+    const edge = { line, x1, y1, x2, y2, cloudIsEnd };
+    this.#allEdges.push(edge);
+    return edge;
+  }
+
+  #svgEl(tag, attrs) {
+    const el = document.createElementNS(TopologyMap.#SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      el.setAttribute(k, String(v));
+    }
+    return el;
+  }
+
+  // ── HTML helpers ───────────────────────────────────────
+
+  #btn(label, title, handler) {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.title = title;
+    btn.addEventListener("click", handler);
+    return btn;
+  }
+
+  #sep() {
+    const el = document.createElement("span");
+    el.className = "topology-separator";
+    return el;
+  }
+}
