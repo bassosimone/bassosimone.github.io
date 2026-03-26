@@ -1,0 +1,611 @@
+TCPInfo/BBRInfo Variable Inventory
+==================================
+
+This file documents the variables, data format, and interpretive
+context for the ndt7 TCPInfo/BBRInfo visualizer. It is intended as
+a reference for both humans and LLMs analyzing ndt7 download
+measurement data.
+
+If you are an LLM and you have been given this file together with
+a JSON export from the visualizer, read this file first to understand
+the data format and the meaning of each variable, then analyze
+the JSON data. Before diving into analysis, ask the user what they
+know about the connection being measured (e.g., is it satellite,
+fiber, mobile? is there a known PEP or middlebox? what is the
+expected RTT range?). This context is essential for interpreting
+the data correctly — the same numbers can mean very different
+things depending on the connection type.
+
+
+1. What This Measurement Is
+---------------------------
+
+An ndt7 download test measures the performance of a single TCP
+connection carrying bulk data from an M-Lab server to the client.
+
+The modern web uses HTTP/2 (multiplexed streams over a single TCP
+connection) or HTTP/3 (QUIC over UDP). Since ndt7 uses TCP, its
+results are most directly relevant to the HTTP/2 case. They show
+what a browser would be capable of when fetching a large resource
+(image, video chunk, JavaScript bundle) from a nearby server over
+a single TCP connection.
+
+This measurement approximates single-flow TCP capacity. It does
+NOT measure:
+- Multi-connection aggregate throughput (as some speed tests do)
+- UDP/QUIC performance (HTTP/3)
+- Application-level goodput (AppInfo is null in server measurements;
+  BytesAcked includes WebSocket and TLS overhead)
+- Upload performance (different TCPInfo semantics; the server is
+  the receiver, not the sender)
+
+M-Lab places servers at IXPs and peering points to be topologically
+close to users. If the server is poorly placed for a given user,
+the measurement reflects path quality to that specific server, not
+the user's general internet quality.
+
+
+2. PEPs and Middleboxes
+-----------------------
+
+A Performance Enhancing Proxy (PEP) is a middlebox that splits a
+TCP connection into two (or more) segments. The canonical mechanism
+(see RFC 3135, PEPsal from CNES/Viveris) uses Linux netfilter's
+TPROXY to intercept TCP segments and redirect new connections to a
+local listener, which accepts the connection "impersonating" the
+remote host, then creates a new connection toward the original
+destination. A userspace relay copies data between the two sockets.
+The endpoints do not know the PEP exists.
+
+This breaks end-to-end TCP semantics: the server receives ACKs
+from the PEP, not from the actual client. The server "thinks" data
+has been delivered when it has only reached the proxy's buffer.
+TLS/HTTPS still works because the PEP manipulates TCP headers
+only — it never sees the encrypted application payload.
+
+In distributed deployments (common in commercial GEO satellite
+systems from Hughes, Comtech, etc.), PEP agents sit on both sides
+of the satellite link, creating three TCP segments:
+server <-> gateway PEP <-> terminal PEP <-> client. The satellite
+leg uses a protocol tuned for high latency, while the end systems
+use standard TCP.
+
+When a split-TCP PEP is present, the server's TCPInfo reflects
+only the path between the server and the PEP, not the full path
+to the end user. RWND, RTT, and congestion signals all describe
+the server-to-PEP segment only.
+
+Important: the assumption that "low RTT on a satellite connection
+implies a PEP" is unreliable for LEO constellations. For GEO
+satellites (~36,000 km), minimum RTT is ~600ms and PEPs are
+nearly universal. But for LEO (e.g., Starlink at ~550km),
+minimum propagation delay to the satellite and back is ~3.7ms
+(Huston, APNIC 2024), and Starlink's own documentation says
+"usually under 10ms for the round-trip." Measured end-to-end
+minimum RTTs of 20-40ms are normal without any PEP (UCLouvain
+2022). Research by UCLouvain/Politecnico di Torino using
+Tracebox found no evidence of TCP-splitting PEPs on Starlink.
+
+Better clues for PEP detection on LEO connections:
+- RTT pattern: end-to-end LEO connections show characteristic
+  RTT stepping at ~15-second intervals (satellite handovers).
+  A PEP would flatten these jumps because the server only sees
+  the stable terrestrial leg.
+- RTT jitter: end-to-end LEO shows ~6.7ms average jitter within
+  each tracking window, with spikes of 30-50ms at handovers.
+  A PEP would absorb this variability.
+- RWND behavior that doesn't match the end client's capabilities
+- Compare ICMP ping RTT (which a TCP-splitting PEP would not
+  affect) to the TCP RTT — a large discrepancy suggests a PEP
+- Traceroute/Tracebox analysis to see where the TCP handshake
+  completes
+
+When analyzing data from satellite connections, always consider
+whether the metrics describe the full end-to-end path or only a
+server-to-PEP segment — but do not assume a PEP exists based on
+RTT alone, especially for LEO.
+
+Further reading on PEPs and satellite TCP:
+- RFC 3135, Performance Enhancing Proxies:
+  https://www.rfc-editor.org/rfc/rfc3135
+- PEPsal source and design document (CNES/Viveris):
+  https://github.com/CNES/pepsal
+- Starlink RTT measurements, handover analysis (Huston, APNIC 2024):
+  https://blog.apnic.net/2024/05/17/a-transport-protocols-view-of-starlink/
+- Starlink PEP/middlebox testing, RTT distributions (UCLouvain 2022):
+  https://blog.apnic.net/2022/11/28/fact-checking-starlinks-performance-figures/
+- Starlink latency whitepaper (Starlink 2024):
+  https://starlink.com/public-files/StarlinkLatency.pdf
+
+Other middleboxes (firewalls, NATs, traffic shapers) can also
+affect measurements. Traffic shapers may impose rate limits that
+show up as artificial throughput ceilings. Firewalls may drop
+packets in patterns that differ from natural congestion. Starlink
+is known to use carrier-grade NATs that alter TCP checksums but
+do not split connections.
+
+
+3. JSON Data Format
+-------------------
+
+The "Download JSON" button exports a file with this structure:
+
+{
+  "metadata": {
+    "uuid": "ndt-XXXXX_XXXXXXXXXX_XXXXXXXXXXXXXXXX",
+    "date": "YYYY-MM-DD",
+    "source": "tcpinfo" or "ndt7",
+    "client": {
+      "asn": 14593,
+      "asName": "Space Exploration Technologies Corporation"
+    },
+    "server": {
+      "site": "mpm02",
+      "machine": "mlab2",
+      "city": "Maputo",
+      "countryCode": "MZ"
+    }
+  },
+  "charts": {
+    "<chart_key>": {
+      "series": [
+        { "label": "timestamp", "values": [unix_seconds, ...] },
+        { "label": "Series Name [unit]", "values": [number, ...] }
+      ]
+    }
+  }
+}
+
+Metadata fields:
+- uuid: unique measurement identifier
+- date: date of the measurement
+- source: "tcpinfo" means data comes from the tcp-info sidecar
+  (higher sampling rate, ~4 samples/sec); "ndt7" means data comes
+  from ndt7 ServerMeasurements (~4 samples/sec, embedded in the
+  ndt7 protocol stream)
+- client.asn / client.asName: the client's Autonomous System
+- server: M-Lab server location and identity
+
+Chart data:
+- Each chart has a key (e.g., "rtt", "speed", "flight_size")
+- Each chart contains an array of series
+- The first series is always "timestamp" in Unix seconds (with
+  fractional milliseconds)
+- Subsequent series contain the plotted values
+- The label includes the unit in square brackets where applicable
+- All series within a chart have the same length
+- null values indicate missing data (e.g., BBRInfo fields when
+  BBR is not the active congestion control algorithm)
+
+
+4. Data Sources
+---------------
+
+The visualizer supports two data sources for the same measurement:
+
+ndt7 ServerMeasurements:
+  The ndt7 protocol includes periodic server-side snapshots in the
+  WebSocket stream. Timestamps are computed as:
+    StartTime + TCPInfo.ElapsedTime / 1e6
+  where ElapsedTime is microseconds since the test started.
+
+tcp-info sidecar:
+  M-Lab runs a separate "tcp-info" process that polls the kernel's
+  TCP_INFO socket option independently of ndt7. Timestamps are
+  absolute ISO timestamps from the sidecar's clock. The sidecar
+  may capture snapshots at a different rate or over a slightly
+  different time window than ndt7.
+
+Both sources read the same kernel data structures (tcp_info and
+tcp_bbr_info via getsockopt). Differences between them are due to
+sampling timing, not different data.
+
+
+5. Charts and Variables
+-----------------------
+
+Each chart in the visualizer plots one or more variables derived
+from TCPInfo and BBRInfo. Below is the complete list, organized
+by chart.
+
+All computations reference fields using the JSON names from the
+ndt7 archival format (e.g., TCPInfo.RTT). The equivalent kernel
+field name (e.g., tcpi_rtt) is noted in parentheses.
+
+
+5.1 RTT
+~~~~~~~
+
+Shows round-trip time dynamics over the test duration.
+All values converted from microseconds to milliseconds.
+
+Series:
+- RTT (smoothed) [ms] = TCPInfo.RTT / 1000
+  Kernel: tcpi_rtt. Exponentially weighted moving average of
+  observed round-trip times. Reflects current path state including
+  queuing delay.
+
+- MinRTT [ms] = TCPInfo.MinRTT / 1000
+  Kernel: tcpi_min_rtt. Minimum RTT ever observed on this
+  connection. Approximates base propagation delay (RTT with no
+  queuing). Can only decrease over time.
+
+- RTTVar [ms] = TCPInfo.RTTVar / 1000
+  Kernel: tcpi_rttvar. Kernel's estimate of RTT variance, used
+  to compute retransmission timeouts. Low = stable path; spikes
+  suggest sudden changes in queuing or routing.
+
+- BBR MinRTT [ms] = BBRInfo.MinRTT / 1000
+  Kernel: bbr_min_rtt. BBR's own min-filtered RTT estimate with
+  a ~10-second window. Usually matches kernel MinRTT but can
+  diverge when BBR's filter expires and it re-probes (ProbeRTT
+  phase). When BBR MinRTT rises above kernel MinRTT, the path's
+  baseline latency has increased since the connection started.
+
+Interpretation:
+  The gap between RTT (smoothed) and MinRTT is the queuing delay
+  (bufferbloat). A large persistent gap means buffers along the
+  path are filling up. On well-tuned connections, BBR should keep
+  this gap small.
+
+
+5.2 BBR Phase
+~~~~~~~~~~~~~
+
+Shows BBR's gain multipliers, revealing what phase of its state
+machine BBR is in at each moment.
+
+BBRInfo gains are stored as fixed-point integers shifted left 8
+bits. We divide by 256 to get the actual multiplier. For example,
+a raw CwndGain of 512 means 512/256 = 2.0.
+
+Series:
+- CwndGain = BBRInfo.CwndGain / 256
+  Kernel: bbr_cwnd_gain. Multiplies the bandwidth-delay product
+  (BDP) to set the congestion window. In ProbeBW steady state
+  it is 2.0 (headroom for ACK aggregation). During ProbeRTT it
+  drops to 1.0.
+
+- PacingGain = BBRInfo.PacingGain / 256
+  Kernel: bbr_pacing_gain. Multiplies BBR's bandwidth estimate
+  to set the pacing rate. Above 1.0 = probing for more bandwidth.
+  Below 1.0 = deliberately draining queues.
+
+BBR state machine phases:
+  Startup:  PacingGain=2.89, CwndGain=2.89 (exponential ramp-up)
+  Drain:    PacingGain=0.34, CwndGain=2.89 (drain startup queue)
+  ProbeBW:  PacingGain cycles 1.25/1.0/0.75, CwndGain=2.0
+  ProbeRTT: CwndGain=1.0 (cwnd shrinks to re-measure MinRTT,
+            happens every ~10 seconds)
+
+BBR controls sending primarily through pacing rate, not the
+congestion window. The congestion window acts as a safety net:
+CWND = CwndGain * BDP + padding (for TSO bursts and ACK
+aggregation). The kernel enforces that bytes in flight never
+exceed the congestion window, regardless of the congestion
+control algorithm.
+
+
+5.3 Congestion Avoidance State
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Shows the kernel's TCP loss recovery state machine over time.
+This operates independently of the congestion control algorithm
+(BBR, CUBIC, etc.).
+
+Series:
+- CAState = TCPInfo.CAState
+  Kernel: tcpi_ca_state. Integer values:
+
+  0 = Open      Normal operation, no loss detected
+  1 = Disorder  Duplicate ACKs arriving, suspicious
+  2 = CWR       Congestion window reduced (ECN response)
+  3 = Recovery  Fast recovery (SACK-based loss repair)
+  4 = Loss      RTO fired, severe loss event
+
+Interpretation:
+  A healthy connection stays at Open (0). Frequent transitions
+  to Recovery (3) indicate ongoing packet loss with SACK-based
+  recovery. Transitions to Loss (4) are more severe: a
+  retransmission timeout fired, which typically causes a
+  significant throughput drop.
+
+
+5.4 Flight Size (diagnostic)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Diagnostic chart showing bytes in flight and the two limits
+that constrain them.
+
+TCP limits data in flight by two mechanisms: congestion control
+(CWND) limits sending to avoid overwhelming the network, and
+flow control (RWND) limits sending to avoid overwhelming the
+receiver. Actual bytes in flight should never exceed
+min(CWND, RWND).
+
+Series:
+- Kernel inflight [KB] =
+    (TCPInfo.Unacked - TCPInfo.Sacked - TCPInfo.Lost
+     + TCPInfo.Retrans) * TCPInfo.SndMSS / 1024
+  This matches the kernel's internal tcp_packets_in_flight()
+  function, which is part of the generic TCP stack (not
+  BBR-specific) and is used to enforce the congestion window
+  limit. The constituent fields:
+    Unacked (tcpi_unacked): total unacknowledged segments
+    Sacked (tcpi_sacked): selectively acknowledged segments
+    Lost (tcpi_lost): segments the kernel considers lost
+    Retrans (tcpi_retrans): retransmissions currently on the wire
+    SndMSS (tcpi_snd_mss): sender maximum segment size
+  Note: multiplying segments by MSS assumes all segments are
+  full-sized. This is reasonable for a bulk download but would
+  not hold for interactive or small-transfer workloads.
+
+- SndCwnd * MSS [KB] =
+    TCPInfo.SndCwnd * TCPInfo.SndMSS / 1024
+  Kernel: tcpi_snd_cwnd * tcpi_snd_mss. The congestion window
+  in bytes. For BBR, this is approximately CwndGain * BDP plus
+  padding for TSO bursts and ACK aggregation.
+
+- RWND [KB] = TCPInfo.SndWnd / 1024
+  Kernel: tcpi_snd_wnd. The receiver's advertised window (after
+  scaling). This is already in bytes. It reflects how much buffer
+  space the receiver is willing to accept.
+
+Interpretation:
+  Kernel inflight should always stay at or below both SndCwnd *
+  MSS and RWND. When RWND is consistently lower than CWND and
+  close to inflight, the receiver is the bottleneck. When CWND is
+  the tighter bound, the network (congestion) is limiting.
+
+
+5.5 Send Buffer (diagnostic)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Diagnostic chart showing application-to-TCP buffering.
+
+Series:
+- NotsentBytes [KB] = TCPInfo.NotsentBytes / 1024
+  Kernel: tcpi_notsent_bytes. Instantaneous bytes in the TCP send
+  buffer that the application has written but TCP has not yet put
+  on the wire. This data is waiting for the congestion window or
+  pacing rate to allow it to be sent.
+
+Interpretation:
+  In a bulk download test, the server writes data as fast as it
+  can. High NotsentBytes means TCP is the bottleneck (the app
+  provided data but TCP cannot send it yet). Near-zero means the
+  application is momentarily not keeping up, or TCP just drained
+  the buffer after a burst of ACKs. Persistently high values
+  suggest TCP is severely constrained.
+
+
+5.6 Stall Diagnostics
+~~~~~~~~~~~~~~~~~~~~~
+
+Shows three cumulative time counters answering: what prevented
+TCP from sending more data? All values converted from microseconds
+to milliseconds. These counters increase monotonically over the
+test. The slope indicates how actively each bottleneck is limiting
+throughput: steep slope = active, flat slope = not active.
+
+Series:
+- BusyTime [ms] = TCPInfo.BusyTime / 1000
+  Kernel: tcpi_busy_time. Cumulative time the TCP send queue was
+  non-empty (TCP had data to send). If this tracks wall-clock test
+  duration, the application kept TCP busy the entire time.
+
+- RWndLimited [ms] = TCPInfo.RWndLimited / 1000
+  Kernel: tcpi_rwnd_limited. Cumulative time TCP could not send
+  because the receiver's advertised window was the tightest
+  constraint. A large value means the receiver cannot absorb data
+  fast enough.
+
+- SndBufLimited [ms] = TCPInfo.SndBufLimited / 1000
+  Kernel: tcpi_sndbuf_limited. Cumulative time TCP could not send
+  because the local send buffer was full. A large value means the
+  send buffer is too small for the connection's BDP and the
+  kernel's autotuning has not (or cannot) grow it further.
+
+Interpretation:
+  Ideally, BusyTime matches the test duration (app always has
+  data), and RWndLimited and SndBufLimited are both near zero
+  (neither endpoint is the bottleneck). When one is significant,
+  it points directly at the bottleneck.
+
+
+5.7 Cumulative BytesAcked
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Shows cumulative acknowledged bytes over time.
+
+Series:
+- BytesAcked [MB] = TCPInfo.BytesAcked / (1024 * 1024)
+  Kernel: tcpi_bytes_acked. Cumulative bytes for which the sender
+  received acknowledgment. Counts original data only, not
+  retransmissions.
+
+Interpretation:
+  The slope of this curve is the throughput. A steeper slope means
+  faster transfer. A flat segment indicates a stall (e.g., during
+  a retransmission timeout). Note: this is measured at the TCP/IP
+  level and includes WebSocket and TLS overhead. True application-
+  level bytes would be slightly less, but ndt7 does not record
+  application-level byte counts server-side (AppInfo is null).
+
+
+5.8 Speed
+~~~~~~~~~
+
+Shows four speed metrics over the test duration, all in Mbps.
+
+Series:
+- Avg Throughput (BytesAcked) [Mbps] =
+    TCPInfo.BytesAcked * 8 / (elapsed_seconds * 1e6)
+  where elapsed is measured from the first snapshot. Cumulative
+  average throughput: total acknowledged bytes divided by total
+  time. Starts low (includes ramp-up) and converges toward the
+  steady-state rate. The final value approximates what ndt7
+  reports as MeanThroughputMbps. Measured at TCP/IP level
+  (includes WebSocket/TLS overhead).
+
+- BBR BW [Mbps] = BBRInfo.BW * 8 / 1e6
+  Kernel: bbr_bw (combined from bbr_bw_hi/bbr_bw_lo). BBR's
+  max-filtered estimate of bottleneck bandwidth in bytes/sec.
+  BBR maintains this as the highest delivery rate observed over
+  a recent time window. Represents what BBR believes the path
+  can sustain. Typically higher than average throughput because
+  it captures peak capacity, not the average including ramp-up.
+
+- Delivery Rate [Mbps] = TCPInfo.DeliveryRate * 8 / 1e6
+  Kernel: tcpi_delivery_rate. Instantaneous estimate of the rate
+  at which data is being delivered, computed from the most recent
+  ACK spacing. Oscillates as ACKs arrive in bursts. Noisier than
+  BBR BW (which is filtered).
+
+- Pacing Rate [Mbps] = TCPInfo.PacingRate * 8 / 1e6
+  Kernel: tcpi_pacing_rate. The rate at which the kernel is
+  actually clocking packets out. For BBR, this equals
+  PacingGain * BBR_BW. When PacingGain is 1.25 (probe up), the
+  pacing rate exceeds BBR BW. When it is 0.75 (drain), it drops
+  below. Directly reflects BBR's probe cycle.
+
+Interpretation:
+  In a healthy connection, Avg Throughput converges to a stable
+  value, BBR BW settles above it (headroom), and Delivery Rate
+  oscillates around the average. A large gap between BBR BW and
+  Avg Throughput may indicate BBR is overestimating path capacity
+  (e.g., a middlebox or PEP buffering data). If Delivery Rate
+  has frequent drops to near zero, the connection is experiencing
+  stalls.
+
+
+6. Additional TCPInfo Fields
+----------------------------
+
+The ndt7 server exports the full Linux tcp_info struct (~50+
+fields), not just the 11 defined in the ndt7 spec. The visualizer
+uses a subset. Below are additional fields present in the raw data
+that may be useful for deeper analysis.
+
+The ndt7 spec defines these 11 fields as the minimum contract:
+  BytesAcked, BytesReceived, BytesSent, BytesRetrans,
+  BusyTime, RWndLimited, SndBufLimited,
+  ElapsedTime, MinRTT, RTT, RTTVar
+
+Additional fields used by the visualizer (not in the spec but
+present in the archival data):
+  CAState, SndCwnd, SndMSS, SndWnd, PacingRate, DeliveryRate,
+  Unacked, Sacked, Lost, Retrans, NotsentBytes
+
+Other potentially useful fields in the raw data:
+
+Connection state:
+  State (tcpi_state)         TCP state (ESTABLISHED, etc.)
+  Options (tcpi_options)     Bitmask: TIMESTAMPS, SACK, WSCALE, ECN
+
+Retransmissions and loss:
+  Retransmits (tcpi_retransmits)    Unrecovered RTO timeouts
+  TotalRetrans (tcpi_total_retrans) Lifetime total retransmissions
+  Reordering (tcpi_reordering)      Reordering metric
+  ReordSeen (tcpi_reord_seen)       Reordering events seen
+  DSACKDups (tcpi_dsack_dups)       DSACK duplicate segments
+
+RTT:
+  RTO (tcpi_rto)             Retransmission timeout (usec)
+  RcvRTT (tcpi_rcv_rtt)     Receiver-side RTT estimate (usec)
+
+Congestion window:
+  SndSSThresh (tcpi_snd_ssthresh)   Slow-start threshold (segments)
+
+Bytes and segments:
+  SegsOut (tcpi_segs_out)           Total segments sent
+  SegsIn (tcpi_segs_in)            Total segments received
+  DataSegsOut (tcpi_data_segs_out)  Data segments sent
+  DataSegsIn (tcpi_data_segs_in)   Data segments received
+  Delivered (tcpi_delivered)        Packets delivered (including OOO)
+
+Window and MSS:
+  RcvMSS (tcpi_rcv_mss)     Receive MSS (bytes)
+  AdvMSS (tcpi_advmss)      Advertised MSS (bytes)
+  PMTU (tcpi_pmtu)          Path MTU (bytes)
+  RcvWnd (tcpi_rcv_wnd)     Local receive window (bytes)
+  RcvSSThresh (tcpi_rcv_ssthresh)   Receiver slow-start threshold
+
+Delivery rate:
+  DeliveryRateAppLimited (tcpi_delivery_rate_app_limited)
+    1 if the delivery rate measurement was app-limited
+  MaxPacingRate (tcpi_max_pacing_rate)
+    Max pacing rate set via SO_MAX_PACING_RATE
+
+
+7. BBRInfo Fields (Complete)
+----------------------------
+
+BBRInfo is only populated when BBR is the active congestion
+control algorithm on the server. All fields:
+
+  BW (bbr_bw_lo + bbr_bw_hi, combined as u64)
+    Max-filtered bandwidth estimate (bytes/sec)
+
+  MinRTT (bbr_min_rtt)
+    Min-filtered RTT (microseconds), ~10-second window
+
+  PacingGain (bbr_pacing_gain)
+    Pacing gain, fixed-point (divide by 256 for multiplier)
+
+  CwndGain (bbr_cwnd_gain)
+    Cwnd gain, fixed-point (divide by 256 for multiplier)
+
+
+8. References
+-------------
+
+Authoritative sources for further reading:
+
+Kernel headers (ultimate source of truth):
+  struct tcp_info:
+    https://github.com/torvalds/linux/blob/master/include/uapi/linux/tcp.h
+  struct tcp_bbr_info:
+    https://github.com/torvalds/linux/blob/master/include/uapi/linux/inet_diag.h
+
+ndt7 protocol spec:
+  https://github.com/m-lab/ndt-server/blob/master/spec/ndt7-protocol.md
+
+ndt7 archival data format:
+  https://github.com/m-lab/ndt-server/blob/master/spec/data-format.md
+
+google/bbr FAQ (BBR field semantics, getsockopt examples):
+  https://github.com/google/bbr/blob/master/Documentation/bbr-faq.md
+
+ESnet BBR TCP (high-level overview, deployment guidance):
+  https://fasterdata.es.net/host-tuning/linux/recent-tcp-enhancements/bbr-tcp/
+
+Mark Zhu: Complete Guide to ss Output Metrics (maps ss fields to
+tcp_info with units and explanations):
+  https://blog.mygraphql.com/en/notes/low-tec/network/tcp-inspect/
+
+tcp(7) man page (TCP_INFO and TCP_CC_INFO options):
+  https://man7.org/linux/man-pages/man7/tcp.7.html
+
+NDT wiki: TCP_INFO vs Web100/Web10G mapping:
+  https://github.com/ndt-project/ndt/wiki/TCP_INFOvsWeb100Web10g
+
+PEPs and satellite TCP:
+
+RFC 3135: Performance Enhancing Proxies:
+  https://www.rfc-editor.org/rfc/rfc3135
+
+PEPsal (CNES/Viveris, canonical split-TCP PEP implementation):
+  https://github.com/CNES/pepsal
+
+Starlink RTT and handover analysis (Huston, APNIC 2024):
+  https://blog.apnic.net/2024/05/17/a-transport-protocols-view-of-starlink/
+
+Starlink RTT and handover analysis, PDF with flood-ping data (Huston):
+  https://www.potaroo.net/ispcol/2024-05/starlink-tcp.pdf
+
+Starlink PEP/middlebox detection, RTT distributions (UCLouvain 2022):
+  https://blog.apnic.net/2022/11/28/fact-checking-starlinks-performance-figures/
+
+Starlink latency whitepaper (Starlink 2024):
+  https://starlink.com/public-files/StarlinkLatency.pdf

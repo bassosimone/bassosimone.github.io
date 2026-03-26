@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ndt7 TCPInfo/BBRInfo Visualizer</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+<link rel="stylesheet" href="index.css">
+</head>
+<body>
+
+<h1>ndt7 TCPInfo/BBRInfo Visualizer</h1>
+
+<div id="controls">
+  <label for="measurement-select">Measurement:</label>
+  <select id="measurement-select">
+    <option value="ndt-q8tz5_1772194732_00000000001CB0A7">MinRTT 36ms</option>
+    <option value="ndt-5z9h2_1772324723_00000000001A4753">MinRTT 116ms</option>
+    <option value="ndt-q8tz5_1772194732_00000000001B0D54">MinRTT 361ms</option>
+  </select>
+
+  <label for="source-select">Data source:</label>
+  <select id="source-select">
+    <option value="tcpinfo">Sidecar (tcp-info)</option>
+    <option value="ndt7">ndt7 ServerMeasurements</option>
+  </select>
+  <button id="download-all" onclick="downloadAllData()">Download JSON</button>
+  <a href="tcpinfo_inventory_llm.txt" target="_blank">LLM-ready variable inventory</a>
+</div>
+
+<div id="info"></div>
+
+<section>
+  <h2>RTT</h2>
+  <details>
+    <summary>About this chart</summary>
+    <p>
+      This chart shows four round-trip time metrics over the duration of
+      the download test. All values are in milliseconds.
+    </p>
+    <p>
+      <strong>RTT (smoothed)</strong> &mdash; <code>TCPInfo.RTT</code>
+      (<code>tcpi_rtt</code>) &mdash; is the kernel's exponentially weighted
+      moving average of observed round-trip times. It reflects the current
+      state of the path including queuing delay.
+    </p>
+    <p>
+      <strong>MinRTT</strong> &mdash; <code>TCPInfo.MinRTT</code>
+      (<code>tcpi_min_rtt</code>) &mdash; is the minimum RTT the kernel has
+      ever observed on this connection. It approximates the base propagation
+      delay of the path (the RTT you'd see with no queuing). It can only
+      decrease over time.
+    </p>
+    <p>
+      <strong>RTTVar</strong> &mdash; <code>TCPInfo.RTTVar</code>
+      (<code>tcpi_rttvar</code>) &mdash; is the kernel's estimate of RTT
+      variance, used to compute retransmission timeouts. Low values indicate
+      a stable path; spikes suggest sudden changes in queuing or routing.
+    </p>
+    <p>
+      <strong>BBR MinRTT</strong> &mdash; <code>BBRInfo.MinRTT</code>
+      (<code>bbr_min_rtt</code>) &mdash; is BBR's own min-filtered RTT
+      estimate. It usually matches the kernel's MinRTT but can diverge when
+      BBR's 10-second filter window expires and it re-probes (during ProbeRTT
+      phase). When BBR MinRTT rises above the kernel's MinRTT, it means
+      the path's baseline latency has increased since the connection started.
+    </p>
+    <p>
+      <strong>What to look for:</strong> the gap between RTT (smoothed) and
+      MinRTT is the queuing delay (bufferbloat). A large, persistent gap
+      means buffers along the path are filling up. On well-tuned connections,
+      BBR should keep this gap small. On satellite or high-latency links,
+      the gap may be significant.
+    </p>
+  </details>
+  <div id="chart-rtt"></div>
+</section>
+
+<hr>
+
+<section>
+  <h2>BBR Phase</h2>
+  <details>
+    <summary>About this chart</summary>
+    <p>
+      This chart shows BBR's two gain multipliers over time. BBR is a
+      congestion control algorithm that controls sending through
+      <strong>pacing</strong> (how fast to send) rather than through the
+      congestion window alone. The gains determine what BBR is doing at
+      each moment.
+    </p>
+    <p>
+      <strong>PacingGain</strong> &mdash; <code>BBRInfo.PacingGain / 256</code>
+      (<code>bbr_pacing_gain</code>) &mdash; multiplies BBR's bandwidth
+      estimate to set the pacing rate. Values above 1.0 mean BBR is sending
+      faster than its current estimate (probing for more bandwidth). Values
+      below 1.0 mean it is deliberately slowing down (draining queues).
+    </p>
+    <p>
+      <strong>CwndGain</strong> &mdash; <code>BBRInfo.CwndGain / 256</code>
+      (<code>bbr_cwnd_gain</code>) &mdash; multiplies the bandwidth-delay
+      product (BDP) to set the congestion window. In steady state (ProbeBW)
+      it is 2.0, giving headroom for ACK aggregation and pacing bursts.
+      During ProbeRTT it drops to 1.0, and the congestion window shrinks
+      to allow BBR to re-measure the path's true minimum RTT.
+    </p>
+    <p>
+      <strong>BBR's state machine:</strong> a typical download starts in
+      <em>Startup</em> (both gains at 2.89, exponential ramp-up), transitions
+      to <em>Drain</em> (pacing gain 0.34, draining the queue built during
+      startup), then enters <em>ProbeBW</em> where it cycles the pacing gain
+      through probe up (1.25), drain (0.75), and cruise (1.0). Every ~10
+      seconds, it enters <em>ProbeRTT</em> (cwnd gain 1.0, cwnd collapses)
+      to refresh its MinRTT estimate.
+    </p>
+    <table class="legend">
+      <thead>
+        <tr><th>Value</th><th>PacingGain</th><th>CwndGain</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>2.89</td><td>Startup</td><td>Startup</td></tr>
+        <tr><td>2.00</td><td></td><td>ProbeBW</td></tr>
+        <tr><td>1.25</td><td>ProbeBW (probe up)</td><td></td></tr>
+        <tr><td>1.00</td><td>ProbeBW (cruise)</td><td>ProbeRTT</td></tr>
+        <tr><td>0.75</td><td>ProbeBW (drain)</td><td></td></tr>
+        <tr><td>0.34</td><td>Drain</td><td></td></tr>
+      </tbody>
+    </table>
+  </details>
+  <div id="chart-bbr"></div>
+</section>
+
+<hr>
+
+<section>
+  <h2>Congestion Avoidance State</h2>
+  <details>
+    <summary>About this chart</summary>
+    <p>
+      This chart shows <code>TCPInfo.CAState</code> (<code>tcpi_ca_state</code>
+      in the kernel) over time. This is the TCP stack's loss recovery state
+      machine, which operates independently of the congestion control algorithm
+      (BBR, CUBIC, etc.). It tells you whether the kernel is detecting and
+      recovering from packet loss at each moment.
+    </p>
+    <p>
+      In a healthy connection, the state stays at <strong>Open</strong> (0).
+      Frequent transitions to <strong>Recovery</strong> (3) indicate ongoing
+      packet loss with SACK-based recovery. A transition to
+      <strong>Loss</strong> (4) is more severe: it means a retransmission
+      timeout (RTO) fired, which typically causes a significant throughput
+      drop.
+    </p>
+    <table class="legend">
+      <thead>
+        <tr><th>Value</th><th>State</th><th>Meaning</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>0</td><td>Open</td><td>Normal, no loss detected</td></tr>
+        <tr><td>1</td><td>Disorder</td><td>Duplicate ACKs arriving, suspicious</td></tr>
+        <tr><td>2</td><td>CWR</td><td>Congestion window reduced (ECN response)</td></tr>
+        <tr><td>3</td><td>Recovery</td><td>Fast recovery (SACK-based)</td></tr>
+        <tr><td>4</td><td>Loss</td><td>RTO fired, severe loss</td></tr>
+      </tbody>
+    </table>
+  </details>
+  <div id="chart-castate"></div>
+</section>
+
+<hr>
+
+<section>
+  <h2>Flight Size (diagnostic)</h2>
+  <details>
+    <summary>About this chart</summary>
+    <p>
+      This is a diagnostic chart. TCP limits the amount of data in flight
+      (sent but not yet acknowledged) by two mechanisms:
+      <strong>congestion control</strong> (CWND) limits sending to avoid
+      overwhelming the network, and <strong>flow control</strong> (RWND)
+      limits sending to avoid overwhelming the receiver. The actual bytes
+      in flight should never exceed <code>min(CWND, RWND)</code>.
+    </p>
+    <p>
+      <strong>Kernel inflight</strong> is the TCP stack's own computation of
+      bytes currently in flight:
+      <code>(Unacked - Sacked - Lost + Retrans) * SndMSS</code>, where
+      <code>Unacked</code> (<code>tcpi_unacked</code>) is total unacknowledged
+      segments, <code>Sacked</code> (<code>tcpi_sacked</code>) are selectively
+      acknowledged (received but not yet cumulatively ACKed),
+      <code>Lost</code> (<code>tcpi_lost</code>) are segments the kernel
+      considers lost, and <code>Retrans</code> (<code>tcpi_retrans</code>)
+      are retransmissions currently on the wire. This matches the kernel's
+      internal <code>tcp_packets_in_flight()</code> function, which is used
+      to enforce the congestion window limit regardless of which congestion
+      control algorithm is active. Note: multiplying segments by MSS to get
+      bytes assumes all segments are full-sized. This is a reasonable
+      assumption for a bulk download test where the sender is pushing as
+      much data as possible, but would not hold for interactive or
+      small-transfer workloads where short segments are common.
+    </p>
+    <p>
+      <strong>SndCwnd * MSS</strong> &mdash; <code>TCPInfo.SndCwnd *
+      TCPInfo.SndMSS</code> (<code>tcpi_snd_cwnd * tcpi_snd_mss</code>)
+      &mdash; is the congestion window in bytes. For BBR, this is set to
+      approximately <code>CwndGain * BDP</code> plus padding for TSO bursts
+      and ACK aggregation.
+    </p>
+    <p>
+      <strong>RWND</strong> &mdash; <code>TCPInfo.SndWnd</code>
+      (<code>tcpi_snd_wnd</code>) &mdash; is the receiver's advertised
+      window after scaling. It reflects how much buffer space the receiver
+      is willing to accept.
+    </p>
+    <p>
+      <strong>What to look for:</strong> the kernel inflight line should
+      always stay at or below both SndCwnd * MSS and RWND. If it doesn't,
+      something is wrong with our understanding. When RWND is consistently
+      lower than CWND and close to the inflight, the receiver is the
+      bottleneck. When CWND is the tighter bound, the network (congestion)
+      is the limiting factor.
+    </p>
+  </details>
+  <div id="chart-flight"></div>
+</section>
+
+<hr>
+
+<section>
+  <h2>Send Buffer (diagnostic)</h2>
+  <details>
+    <summary>About this chart</summary>
+    <p>
+      This is a diagnostic chart. It shows <code>TCPInfo.NotsentBytes</code>
+      (<code>tcpi_notsent_bytes</code>): the amount of data sitting in the
+      TCP send buffer that the application has written but TCP has not yet
+      put on the wire. This data is waiting for the congestion window or
+      the pacing rate to allow it to be sent.
+    </p>
+    <p>
+      In a bulk download test like ndt7, the server writes data as fast as
+      it can. When <code>NotsentBytes</code> is high, TCP is the bottleneck
+      &mdash; the application has provided data but TCP cannot send it yet
+      (congestion or flow control limited). When it drops to zero, the
+      application is momentarily not keeping up, or TCP has just drained
+      the buffer after a burst of ACKs.
+    </p>
+    <p>
+      <strong>What to look for:</strong> in a well-functioning download,
+      <code>NotsentBytes</code> oscillates &mdash; filling when the app
+      writes a burst, draining as TCP sends. Persistently high values
+      suggest TCP is severely constrained. Persistently zero would suggest
+      the application is not writing fast enough to keep TCP busy (but this
+      is unlikely in ndt7's bulk sender).
+    </p>
+  </details>
+  <div id="chart-notsent"></div>
+</section>
+
+<hr>
+
+<section>
+  <h2>Stall Diagnostics</h2>
+  <details>
+    <summary>About this chart</summary>
+    <p>
+      This chart shows three cumulative time counters that answer the
+      question: <em>what prevented TCP from sending more data?</em>
+      All values are in milliseconds and increase monotonically over
+      the test. The slope of each line indicates how actively that
+      bottleneck is limiting throughput at each moment: a steep slope
+      means it is active, a flat slope means it is not.
+    </p>
+    <p>
+      <strong>BusyTime</strong> &mdash; <code>TCPInfo.BusyTime</code>
+      (<code>tcpi_busy_time</code>) &mdash; cumulative time the TCP
+      send queue was non-empty (i.e., TCP had data to send). If this
+      tracks the wall-clock test duration, the application kept TCP
+      busy the entire time. If it is significantly less, the application
+      itself was the bottleneck (not writing data fast enough).
+    </p>
+    <p>
+      <strong>RWndLimited</strong> &mdash; <code>TCPInfo.RWndLimited</code>
+      (<code>tcpi_rwnd_limited</code>) &mdash; cumulative time TCP could
+      not send because the receiver's advertised window (RWND) was the
+      tightest constraint. A large value here means the receiver cannot
+      absorb data fast enough.
+    </p>
+    <p>
+      <strong>SndBufLimited</strong> &mdash; <code>TCPInfo.SndBufLimited</code>
+      (<code>tcpi_sndbuf_limited</code>) &mdash; cumulative time TCP could
+      not send because the local send buffer was full. A large value here
+      means the send buffer is too small for the connection's BDP, and
+      the kernel's autotuning has not (or cannot) grow it further.
+    </p>
+    <p>
+      <strong>What to look for:</strong> ideally, BusyTime matches the
+      test duration (app always has data), and RWndLimited and SndBufLimited
+      are both near zero (neither endpoint is the bottleneck, so the network
+      is the only limiting factor). When one of the two is significant, it
+      points directly at the bottleneck: receiver too slow, or send buffer
+      too small.
+    </p>
+  </details>
+  <div id="chart-stalls"></div>
+</section>
+
+<hr>
+
+<section>
+  <h2>Cumulative BytesAcked</h2>
+  <details>
+    <summary>About this chart</summary>
+    <p>
+      This chart shows <code>TCPInfo.BytesAcked</code>
+      (<code>tcpi_bytes_acked</code>) over time, in megabytes. This is
+      the cumulative count of bytes for which the sender has received
+      acknowledgment from the receiver. It only counts original data,
+      not retransmissions.
+    </p>
+    <p>
+      The slope of this curve is the throughput &mdash; the rate at which
+      data is being acknowledged. A steeper slope means faster transfer.
+      A flat segment would indicate a stall where no new data is being
+      acknowledged (e.g., during a retransmission timeout or severe loss
+      event).
+    </p>
+    <p>
+      Note: this is measured at the TCP/IP level and includes WebSocket
+      and TLS overhead. The true application-level bytes delivered would
+      be slightly less, but the ndt7 server does not record application-level
+      byte counts (<code>AppInfo</code> is null in server measurements).
+    </p>
+  </details>
+  <div id="chart-bytes"></div>
+</section>
+
+<hr>
+
+<section>
+  <h2>Speed</h2>
+  <details>
+    <summary>About this chart</summary>
+    <p>
+      This chart shows four different speed metrics over the duration of
+      the download test. All values are in megabits per second (Mbps).
+      Each metric answers a slightly different question about how fast
+      data is flowing, and the relationships between them reveal what
+      the network and TCP are doing.
+    </p>
+    <p>
+      <strong>Avg Throughput (BytesAcked)</strong> is computed as
+      <code>TCPInfo.BytesAcked * 8 / elapsed</code>, where elapsed is
+      measured from the first snapshot. This is the cumulative average
+      goodput &mdash; total acknowledged bytes divided by total time. It
+      starts low (includes the ramp-up) and converges toward the
+      steady-state rate. The final value approximates what ndt7 reports
+      as <code>MeanThroughputMbps</code>. Note: this is measured at the
+      TCP/IP level, so it includes WebSocket and TLS overhead.
+    </p>
+    <p>
+      <strong>BBR BW</strong> &mdash; <code>BBRInfo.BW * 8 / 1e6</code>
+      (<code>bbr_bw</code>) &mdash; is BBR's max-filtered estimate of
+      the bottleneck bandwidth. BBR maintains this as the highest delivery
+      rate observed over a recent time window. It represents what BBR
+      <em>believes</em> the path can sustain. It is typically higher than
+      the average throughput because it captures the peak capacity, not
+      the average including ramp-up and overhead.
+    </p>
+    <p>
+      <strong>Delivery Rate</strong> &mdash; <code>TCPInfo.DeliveryRate
+      * 8 / 1e6</code> (<code>tcpi_delivery_rate</code>) &mdash; is the
+      kernel's instantaneous estimate of the rate at which data is being
+      delivered to the receiver, computed from the most recent ACK
+      spacing. It oscillates as ACKs arrive in bursts and is noisier
+      than BBR BW (which is filtered).
+    </p>
+    <p>
+      <strong>Pacing Rate</strong> &mdash; <code>TCPInfo.PacingRate
+      * 8 / 1e6</code> (<code>tcpi_pacing_rate</code>) &mdash; is the
+      rate at which the kernel is actually clocking packets out. For BBR,
+      this equals <code>PacingGain * BBR BW</code>. When PacingGain is
+      1.25 (probe up), the pacing rate exceeds BBR BW. When it is 0.75
+      (drain), the pacing rate drops below. This directly reflects BBR's
+      probe cycle visible in the BBR Phase chart.
+    </p>
+    <p>
+      <strong>What to look for:</strong> in a healthy connection, Avg
+      Throughput converges to a stable value, BBR BW settles above it
+      (representing headroom), and Delivery Rate oscillates around the
+      average. Pacing Rate shows BBR's probe cycles. A large gap between
+      BBR BW and Avg Throughput may indicate that BBR is overestimating
+      the path capacity (e.g., due to a middlebox or PEP buffering data).
+      If Delivery Rate has frequent drops to near zero, the connection
+      is experiencing stalls.
+    </p>
+  </details>
+  <div id="chart-speed"></div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+<script src="index.js"></script>
+</body>
+</html>

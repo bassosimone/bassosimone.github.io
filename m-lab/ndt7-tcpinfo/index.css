@@ -1,0 +1,42 @@
+body {
+  font-family: sans-serif;
+  margin: 20px;
+}
+
+#controls {
+  margin-bottom: 20px;
+}
+
+#controls label {
+  margin-right: 4px;
+}
+
+#controls select {
+  margin-right: 16px;
+}
+
+#info {
+  margin-bottom: 20px;
+}
+
+#chart-speed,
+#chart-rtt,
+#chart-bbr,
+#chart-castate,
+#chart-notsent,
+#chart-stalls,
+#chart-bytes,
+#chart-flight {
+  margin-bottom: 24px;
+}
+
+table.legend {
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.legend th, .legend td {
+  border: 1px solid #ccc;
+  padding: 4px 10px;
+  text-align: left;
+}
