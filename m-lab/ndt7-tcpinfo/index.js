@@ -43,6 +43,16 @@ const color = ["#e63946", "#0891b2", "#ca8a04", "#16a34a"];
 // Shared cursor sync key so all charts link on hover.
 const cursorSync = { key: "ndt7viz" };
 
+// X-axis (time) series value formatter: show HH:MM:SS.mmm
+function fmtTime(u, ts) {
+  const d = new Date(ts * 1000);
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  return `${h}:${m}:${s}.${ms}`;
+}
+
 // Common options shared by all panels.
 function commonOpts(title, width) {
   return {
@@ -88,7 +98,7 @@ function buildSpeedChart(container, series) {
       { label: "Mbps" },
     ],
     series: [
-      {},
+      { value: fmtTime },
       { label: "Avg Throughput (BytesAcked)", stroke: color[0], width: 2 },
       { label: "BBR BW", stroke: color[1], width: 2 },
       { label: "Delivery Rate", stroke: color[2], width: 2, dash: [4, 4] },
@@ -119,7 +129,7 @@ function buildRTTChart(container, series) {
       { label: "ms" },
     ],
     series: [
-      {},
+      { value: fmtTime },
       { label: "RTT (smoothed)", stroke: color[0], width: 2 },
       { label: "MinRTT", stroke: color[1], width: 2 },
       { label: "RTTVar", stroke: color[2], width: 2, dash: [4, 4] },
@@ -146,7 +156,7 @@ function buildCAStateChart(container, series) {
       { label: "state" },
     ],
     series: [
-      {},
+      { value: fmtTime },
       { label: "CAState", stroke: color[0], width: 2 },
     ],
   };
@@ -172,7 +182,7 @@ function buildBBRPhaseChart(container, series) {
       { label: "gain" },
     ],
     series: [
-      {},
+      { value: fmtTime },
       { label: "CwndGain", stroke: color[0], width: 2 },
       { label: "PacingGain", stroke: color[1], width: 2 },
     ],
@@ -197,7 +207,7 @@ function buildNotsentChart(container, series) {
       { label: "KB" },
     ],
     series: [
-      {},
+      { value: fmtTime },
       { label: "NotsentBytes", stroke: color[0], width: 2 },
     ],
   };
@@ -224,7 +234,7 @@ function buildStallsChart(container, series) {
       { label: "ms (cumulative)" },
     ],
     series: [
-      {},
+      { value: fmtTime },
       { label: "BusyTime", stroke: color[0], width: 2 },
       { label: "RWndLimited", stroke: color[1], width: 2 },
       { label: "SndBufLimited", stroke: color[2], width: 2, dash: [4, 4] },
@@ -251,7 +261,7 @@ function buildBytesChart(container, series) {
       { label: "MB" },
     ],
     series: [
-      {},
+      { value: fmtTime },
       { label: "BytesAcked", stroke: color[0], width: 2 },
     ],
   };
@@ -284,7 +294,7 @@ function buildFlightSizeChart(container, series) {
       { label: "KB" },
     ],
     series: [
-      {},
+      { value: fmtTime },
       { label: "Kernel inflight", stroke: color[0], width: 2 },
       { label: "SndCwnd * MSS", stroke: color[1], width: 2 },
       { label: "RWND", stroke: color[2], width: 2, dash: [8, 4] },
