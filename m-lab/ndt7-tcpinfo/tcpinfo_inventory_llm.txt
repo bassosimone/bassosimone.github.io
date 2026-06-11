@@ -39,10 +39,13 @@ NOT measure:
 - Upload performance (different TCPInfo semantics; the server is
   the receiver, not the sender)
 
-M-Lab places servers at IXPs and peering points to be topologically
-close to users. If the server is poorly placed for a given user,
-the measurement reflects path quality to that specific server, not
-the user's general internet quality.
+M-Lab places servers inside transit providers' and cloud providers'
+networks, so that the path from the user typically crosses one or
+two interconnections. The measurement deliberately includes the
+access ISP's interconnection points, not just the access network.
+If the server is poorly placed for a given user, the measurement
+reflects path quality to that specific server, not the user's
+general internet quality.
 
 
 2. PEPs and Middleboxes
@@ -162,7 +165,9 @@ Metadata fields:
 - source: "tcpinfo" means data comes from the tcp-info sidecar
   (higher sampling rate, ~4 samples/sec); "ndt7" means data comes
   from ndt7 ServerMeasurements (~4 samples/sec, embedded in the
-  ndt7 protocol stream)
+  ndt7 protocol stream). These rates are typical, not guaranteed:
+  derive the actual inter-sample interval from the timestamp
+  series before reasoning about fast dynamics.
 - client.asn / client.asName: the client's Autonomous System
 - server: M-Lab server location and identity
 
@@ -200,6 +205,50 @@ Both sources read the same kernel data structures (tcp_info and
 tcp_bbr_info via getsockopt). Differences between them are due to
 sampling timing, not different data.
 
+Sampling classes:
+
+The fields fall into four classes with very different behavior
+under sparse sampling (terminology borrowed from Prometheus):
+
+- counter: cumulative and monotonic (e.g., BytesAcked, BusyTime,
+  RWndLimited, SndBufLimited, TotalRetrans, SegsOut, Delivered).
+  The difference between two samples is the exact total for that
+  interval, regardless of sampling rate. Sparse sampling loses
+  resolution, never correctness. These are the most trustworthy
+  series.
+
+- raw gauge: instantaneous kernel state (e.g., SndCwnd, RWND,
+  NotsentBytes, the inflight components, CAState, the BBR gains).
+  These change per ACK — typically hundreds to thousands of times
+  per second — so samples are sparse snapshots of a much faster
+  process. Anything happening between samples is invisible
+  (aliasing): a complete fast-recovery episode, or a full ProbeBW
+  gain cycle, can begin and end between two samples.
+
+- running min: MinRTT. Monotone and computed by the kernel over
+  the connection's entire history, so nothing is missed by sparse
+  sampling. (BBR MinRTT is a windowed min over ~10 s: weaker, but
+  still slowly varying.)
+
+- smoothed gauge: SmoothedRTT, RTTVar, BBR's bandwidth estimate.
+  The kernel itself filters these (EWMA or max-filter) between
+  samples, so sampled values are representative of the recent
+  past rather than lucky point reads; fast transients are
+  smoothed away by design rather than randomly missed.
+
+Do not assume a fixed sampling rate: derive the actual inter-
+sample interval from the timestamp series of the specific test
+(it differs by data source and may vary within a test), compare
+it with the connection's RTT, and only then decide which gauge
+dynamics are observable. Conclusions drawn from raw-gauge series
+about events shorter than a few sampling intervals are
+unreliable.
+
+Cross-check rule: when a gauge and a counter disagree, trust the
+counter. If CAState never shows Recovery but TotalRetrans
+advanced, loss happened between samples. If the RTT chart looks
+flat but RWndLimited accumulated, stalls fell between samples.
+
 
 5. Charts and Variables
 -----------------------
@@ -223,17 +272,21 @@ Series:
 - RTT (smoothed) [ms] = TCPInfo.RTT / 1000
   Kernel: tcpi_rtt. Exponentially weighted moving average of
   observed round-trip times. Reflects current path state including
-  queuing delay.
+  queuing delay. Sampling class: smoothed gauge.
 
 - MinRTT [ms] = TCPInfo.MinRTT / 1000
   Kernel: tcpi_min_rtt. Minimum RTT ever observed on this
   connection. Approximates base propagation delay (RTT with no
-  queuing). Can only decrease over time.
+  queuing), provided the bottleneck queue drained at least once
+  during the connection. Can only decrease over time. Sampling
+  class: running min.
 
 - RTTVar [ms] = TCPInfo.RTTVar / 1000
-  Kernel: tcpi_rttvar. Kernel's estimate of RTT variance, used
-  to compute retransmission timeouts. Low = stable path; spikes
-  suggest sudden changes in queuing or routing.
+  Kernel: tcpi_rttvar. Kernel's smoothed mean deviation of RTT
+  (same unit as RTT, not a true variance), used to compute
+  retransmission timeouts. Low = stable path; spikes suggest
+  sudden changes in queuing or routing. Sampling class: smoothed
+  gauge.
 
 - BBR MinRTT [ms] = BBRInfo.MinRTT / 1000
   Kernel: bbr_min_rtt. BBR's own min-filtered RTT estimate with
@@ -241,12 +294,19 @@ Series:
   diverge when BBR's filter expires and it re-probes (ProbeRTT
   phase). When BBR MinRTT rises above kernel MinRTT, the path's
   baseline latency has increased since the connection started.
+  Sampling class: windowed min (~10 s), slowly varying.
 
 Interpretation:
-  The gap between RTT (smoothed) and MinRTT is the queuing delay
-  (bufferbloat). A large persistent gap means buffers along the
-  path are filling up. On well-tuned connections, BBR should keep
-  this gap small.
+  The gap between RTT (smoothed) and MinRTT measures queuing
+  delay relative to the best RTT observed during the test. This
+  is inherently a relative measure: MinRTT itself includes any
+  standing queue that never drained while the connection was
+  alive (e.g., from sustained cross traffic), so the gap captures
+  only the variable part of queuing and is a lower bound on total
+  bufferbloat. A large persistent gap means buffers along the
+  path are filling up. Typically, BBR bounds the gap only loosely
+  (under some conditions only to ~2.4x MinRTT), and queues built
+  by cross traffic are unbounded unless the network uses AQM.
 
 
 5.2 BBR Phase
@@ -264,12 +324,13 @@ Series:
   Kernel: bbr_cwnd_gain. Multiplies the bandwidth-delay product
   (BDP) to set the congestion window. In ProbeBW steady state
   it is 2.0 (headroom for ACK aggregation). During ProbeRTT it
-  drops to 1.0.
+  drops to 1.0. Sampling class: raw gauge.
 
 - PacingGain = BBRInfo.PacingGain / 256
   Kernel: bbr_pacing_gain. Multiplies BBR's bandwidth estimate
   to set the pacing rate. Above 1.0 = probing for more bandwidth.
-  Below 1.0 = deliberately draining queues.
+  Below 1.0 = deliberately draining queues. Sampling class: raw
+  gauge.
 
 BBR state machine phases:
   Startup:  PacingGain=2.89, CwndGain=2.89 (exponential ramp-up)
@@ -277,6 +338,10 @@ BBR state machine phases:
   ProbeBW:  PacingGain cycles 1.25/1.0/0.75, CwndGain=2.0
   ProbeRTT: CwndGain=1.0 (cwnd shrinks to re-measure MinRTT,
             happens every ~10 seconds)
+
+Note: in ProbeBW the pacing-gain cycle advances roughly once per
+RTT, often much faster than the sampling interval, so sampled
+gain values are aliased snapshots of the cycle, not its shape.
 
 BBR controls sending primarily through pacing rate, not the
 congestion window. The congestion window acts as a safety net:
@@ -303,12 +368,22 @@ Series:
   3 = Recovery  Fast recovery (SACK-based loss repair)
   4 = Loss      RTO fired, severe loss event
 
+  Sampling class: raw gauge — a brief Recovery episode can begin
+  and end between samples; cross-check with retransmission
+  counters (e.g., TotalRetrans).
+
 Interpretation:
   A healthy connection stays at Open (0). Frequent transitions
   to Recovery (3) indicate ongoing packet loss with SACK-based
   recovery. Transitions to Loss (4) are more severe: a
   retransmission timeout fired, which typically causes a
-  significant throughput drop.
+  significant throughput drop. However, modern Linux uses
+  RACK-TLP (RFC 8985), which repairs nearly all loss patterns —
+  including tail loss and lost retransmissions — within Recovery
+  (3). The Loss (4) state is reached only under pathological
+  conditions, e.g., 100% loss for longer than a full RTT, so it
+  suggests a path blackout (outage, handover failure) rather
+  than ordinary congestion.
 
 
 5.4 Flight Size (diagnostic)
@@ -339,23 +414,34 @@ Series:
   Note: multiplying segments by MSS assumes all segments are
   full-sized. This is reasonable for a bulk download but would
   not hold for interactive or small-transfer workloads.
+  Sampling class: raw gauge (changes per ACK).
 
 - SndCwnd * MSS [KB] =
     TCPInfo.SndCwnd * TCPInfo.SndMSS / 1024
   Kernel: tcpi_snd_cwnd * tcpi_snd_mss. The congestion window
   in bytes. For BBR, this is approximately CwndGain * BDP plus
-  padding for TSO bursts and ACK aggregation.
+  padding for TSO bursts and ACK aggregation. Sampling class:
+  raw gauge.
 
 - RWND [KB] = TCPInfo.SndWnd / 1024
   Kernel: tcpi_snd_wnd. The receiver's advertised window (after
   scaling). This is already in bytes. It reflects how much buffer
-  space the receiver is willing to accept.
+  space the receiver is willing to accept. Sampling class: raw
+  gauge.
 
 Interpretation:
   Kernel inflight should always stay at or below both SndCwnd *
   MSS and RWND. When RWND is consistently lower than CWND and
   close to inflight, the receiver is the bottleneck. When CWND is
-  the tighter bound, the network (congestion) is limiting.
+  the tighter bound, the network (congestion) is limiting. Note:
+  loss recovery needs sequence space beyond the loss — a hole at
+  the left edge of the window freezes the cumulative ACK, and the
+  sender can keep sending new data during the recovery round-trip
+  only if RWND is about twice cwnd/inflight. This requirement
+  comes from the generic loss-recovery machinery (SACK/PRR),
+  independent of the congestion control algorithm. RWND below
+  ~2x cwnd thus degrades performance on lossy paths even when it
+  never appears to be the binding limit.
 
 
 5.5 Send Buffer (diagnostic)
@@ -368,15 +454,20 @@ Series:
   Kernel: tcpi_notsent_bytes. Instantaneous bytes in the TCP send
   buffer that the application has written but TCP has not yet put
   on the wire. This data is waiting for the congestion window or
-  pacing rate to allow it to be sent.
+  pacing rate to allow it to be sent. Sampling class: raw gauge.
 
 Interpretation:
   In a bulk download test, the server writes data as fast as it
   can. High NotsentBytes means TCP is the bottleneck (the app
-  provided data but TCP cannot send it yet). Near-zero means the
+  provided data but TCP cannot send it yet): this is the expected
+  state — it means the test is loading the network — and is not
+  particularly diagnostic, since unsent bytes are just bufferbloat
+  sitting in the sender's socket buffer. Near-zero means the
   application is momentarily not keeping up, or TCP just drained
-  the buffer after a burst of ACKs. Persistently high values
-  suggest TCP is severely constrained.
+  the buffer after a burst of ACKs. Persistently low values mean
+  the sender cannot fill the socket buffer fast enough for TCP to
+  load the network: a sender-side bottleneck, and the measurement
+  may underestimate the network.
 
 
 5.6 Stall Diagnostics
@@ -393,24 +484,38 @@ Series:
   Kernel: tcpi_busy_time. Cumulative time the TCP send queue was
   non-empty (TCP had data to send). If this tracks wall-clock test
   duration, the application kept TCP busy the entire time.
+  Sampling class: counter.
 
 - RWndLimited [ms] = TCPInfo.RWndLimited / 1000
   Kernel: tcpi_rwnd_limited. Cumulative time TCP could not send
   because the receiver's advertised window was the tightest
   constraint. A large value means the receiver cannot absorb data
-  fast enough.
+  fast enough. This is an explicit, kernel-accounted indication
+  that the receiver is the bottleneck (no inference from window
+  comparisons needed). Tests with large RWndLimited measure the
+  client rather than the network and can be labeled accordingly;
+  their throughput underestimates the path. Sampling class:
+  counter.
 
 - SndBufLimited [ms] = TCPInfo.SndBufLimited / 1000
   Kernel: tcpi_sndbuf_limited. Cumulative time TCP could not send
   because the local send buffer was full. A large value means the
   send buffer is too small for the connection's BDP and the
   kernel's autotuning has not (or cannot) grow it further.
+  Interpret with care: many things briefly pause a sender without
+  being counted here (e.g., waiting to accumulate data for TSO),
+  and this counter instruments a narrow internal buffer-starvation
+  condition. Treat large values as a hint of send-buffer pressure,
+  not a precise diagnosis. Sampling class: counter.
 
 Interpretation:
   Ideally, BusyTime matches the test duration (app always has
   data), and RWndLimited and SndBufLimited are both near zero
   (neither endpoint is the bottleneck). When one is significant,
-  it points directly at the bottleneck.
+  it points directly at the bottleneck. In principle, (test
+  duration - BusyTime) is a direct indicator of sender-side
+  bottlenecks: it is time TCP had nothing to send. This
+  complements low NotsentBytes (section 5.5).
 
 
 5.7 Cumulative BytesAcked
@@ -422,7 +527,7 @@ Series:
 - BytesAcked [MB] = TCPInfo.BytesAcked / (1024 * 1024)
   Kernel: tcpi_bytes_acked. Cumulative bytes for which the sender
   received acknowledgment. Counts original data only, not
-  retransmissions.
+  retransmissions. Sampling class: counter.
 
 Interpretation:
   The slope of this curve is the throughput. A steeper slope means
@@ -497,7 +602,9 @@ present in the archival data):
   CAState, SndCwnd, SndMSS, SndWnd, PacingRate, DeliveryRate,
   Unacked, Sacked, Lost, Retrans, NotsentBytes
 
-Other potentially useful fields in the raw data:
+Other potentially useful fields in the raw data. Counters in
+this list: TotalRetrans, DSACKDups, ReordSeen, SegsOut, SegsIn,
+DataSegsOut, DataSegsIn, Delivered; the rest are gauges:
 
 Connection state:
   State (tcpi_state)         TCP state (ESTABLISHED, etc.)
@@ -545,7 +652,7 @@ BBRInfo is only populated when BBR is the active congestion
 control algorithm on the server. All fields:
 
   BW (bbr_bw_lo + bbr_bw_hi, combined as u64)
-    Max-filtered bandwidth estimate (bytes/sec)
+    Max-filtered bandwidth estimate (bytes/sec); smoothed gauge
 
   MinRTT (bbr_min_rtt)
     Min-filtered RTT (microseconds), ~10-second window
@@ -567,6 +674,30 @@ Kernel headers (ultimate source of truth):
     https://github.com/torvalds/linux/blob/master/include/uapi/linux/tcp.h
   struct tcp_bbr_info:
     https://github.com/torvalds/linux/blob/master/include/uapi/linux/inet_diag.h
+
+TCP specifications behind the metrics:
+
+RFC 5681: TCP Congestion Control (cwnd, flight size, rwnd):
+  https://www.rfc-editor.org/rfc/rfc5681
+
+RFC 6298: Computing TCP's Retransmission Timer (SmoothedRTT and
+RTTVar estimators; obsoletes RFC 2988; Linux adjusts constants):
+  https://www.rfc-editor.org/rfc/rfc6298
+
+RFC 6937: Proportional Rate Reduction (sending during recovery):
+  https://www.rfc-editor.org/rfc/rfc6937
+
+RFC 8985: RACK-TLP Loss Detection (why the Loss state is rare):
+  https://www.rfc-editor.org/rfc/rfc8985
+
+RFC 9438: CUBIC (default congestion control on most endpoints):
+  https://www.rfc-editor.org/rfc/rfc9438
+
+BBR congestion control (IETF draft; not yet an RFC):
+  https://datatracker.ietf.org/doc/draft-ietf-ccwg-bbr/
+
+BBR: Congestion-Based Congestion Control (Cardwell et al., 2016):
+  https://queue.acm.org/detail.cfm?id=3022184
 
 ndt7 protocol spec:
   https://github.com/m-lab/ndt-server/blob/master/spec/ndt7-protocol.md
