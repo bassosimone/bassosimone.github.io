@@ -171,6 +171,15 @@ class ChartsView {
       const sRecv = speed.map(s => s.recvMbps);
       this.#buildSpeedChart(sElapsed, sSend, sRecv);
     }
+
+    const bw = this.#computeMaxBandwidth(tcp, addr, samples);
+    if (bw.length > 0) {
+      const bt0 = bw[0].timeUs;
+      const bElapsed = bw.map(s => (s.timeUs - bt0) / 1000);
+      const bRate = bw.map(s => s.rateMbps);
+      const bMax = bw.map(s => s.maxMbps);
+      this.#buildMaxBandwidthChart(bElapsed, bRate, bMax);
+    }
   }
 
   // Compute RTT samples from a given observer's perspective.
@@ -714,6 +723,181 @@ class ChartsView {
     };
 
     const chart = new uPlot(opts, [timestamps, sendMbps, recvMbps], chartDiv);
+    this.#charts.push(chart);
+  }
+
+  // BBR-style max bandwidth estimation.
+  // For each ACK, compute the delivery rate as the bytes delivered
+  // between when the acknowledged segment was sent and when the ACK
+  // arrived, divided by that time interval. The max over a sliding
+  // window of 10 RTTs gives the bottleneck bandwidth estimate.
+  #computeMaxBandwidth(tcpPackets, addr, rttSamples) {
+    // Use median RTT for the window size; fall back to 25ms.
+    const sortedRtts = rttSamples.map(s => s.rttUs).sort((a, b) => a - b);
+    const medianRttUs = sortedRtts.length > 0
+      ? sortedRtts[Math.floor(sortedRtts.length / 2)]
+      : 25000;
+    const windowUs = medianRttUs * 10;
+
+    // Build timeline of cumulative acked bytes.
+    let ackIsn = 0;
+    let highAck = 0;
+    let ackInit = false;
+    const ackTimeline = [];
+    for (const p of tcpPackets) {
+      if (p.event !== "delivered" || p.dst !== addr) continue;
+      const t = p.detail.tcp;
+      if (!t.flag_ack) continue;
+      if (!ackInit) {
+        ackIsn = t.ack;
+        ackInit = true;
+        continue;
+      }
+      if (t.ack > highAck) {
+        highAck = t.ack;
+        ackTimeline.push({
+          timeUs: this.#parseTimeMicros(p.time),
+          cumAcked: highAck - ackIsn,
+        });
+      }
+    }
+
+    // Build sent segments with cumulative acked at send time.
+    let seqIsn = 0;
+    let seqInit = false;
+    let ackIdx = 0;
+    let cumAckedAtSend = 0;
+    const segments = [];
+    for (const p of tcpPackets) {
+      if (p.event !== "entered" || p.src !== addr) continue;
+      const t = p.detail.tcp;
+      const effectiveLen = t.payload_length > 0
+        ? t.payload_length
+        : (t.flag_syn || t.flag_fin ? 1 : 0);
+      if (effectiveLen === 0) continue;
+
+      const timeUs = this.#parseTimeMicros(p.time);
+      if (!seqInit) {
+        seqIsn = t.seq;
+        seqInit = true;
+      }
+
+      while (ackIdx < ackTimeline.length && ackTimeline[ackIdx].timeUs <= timeUs) {
+        cumAckedAtSend = ackTimeline[ackIdx].cumAcked;
+        ackIdx++;
+      }
+
+      segments.push({
+        timeUs: timeUs,
+        seqEnd: t.seq + effectiveLen - seqIsn,
+        deliveredAtSend: cumAckedAtSend,
+      });
+    }
+
+    // For each ACK, compute delivery rate and track the max over
+    // a sliding window.
+    let segIdx = 0;
+    const rates = [];
+    for (const ack of ackTimeline) {
+      while (segIdx < segments.length && segments[segIdx].seqEnd <= ack.cumAcked) {
+        segIdx++;
+      }
+      if (segIdx === 0) continue;
+
+      const seg = segments[segIdx - 1];
+      const dt = ack.timeUs - seg.timeUs;
+      if (dt <= 0) continue;
+
+      const deliveredDelta = ack.cumAcked - seg.deliveredAtSend;
+      if (deliveredDelta <= 0) continue;
+
+      const rateMbps = (deliveredDelta * 8) / dt;
+
+      // Max over sliding window.
+      let maxMbps = rateMbps;
+      for (let j = rates.length - 1; j >= 0; j--) {
+        if (ack.timeUs - rates[j].timeUs > windowUs) break;
+        if (rates[j].rateMbps > maxMbps) maxMbps = rates[j].rateMbps;
+      }
+
+      rates.push({
+        timeUs: ack.timeUs,
+        rateMbps: rateMbps,
+        maxMbps: maxMbps,
+      });
+    }
+
+    return rates;
+  }
+
+  #buildMaxBandwidthChart(timestamps, rawRate, maxRate) {
+    const section = document.createElement("div");
+    section.className = "charts-section";
+
+    const heading = document.createElement("h3");
+    heading.textContent = "Max Bandwidth (BBR estimate)";
+    section.appendChild(heading);
+
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "About this chart";
+    details.appendChild(summary);
+
+    const p1 = document.createElement("p");
+    p1.innerHTML =
+      "<strong>Delivery Rate</strong> — for each ACK, the bytes " +
+      "delivered between when the acknowledged segment was sent and " +
+      "when the ACK arrived, divided by that time interval. This is " +
+      "how BBR estimates the bottleneck bandwidth per sample.";
+    details.appendChild(p1);
+
+    const p2 = document.createElement("p");
+    p2.innerHTML =
+      "<strong>Max BW (10-RTT window)</strong> — the maximum delivery " +
+      "rate observed over a sliding window of 10 round-trip times. " +
+      "This is BBR's BtlBw estimate: the bottleneck bandwidth of " +
+      "the path.";
+    details.appendChild(p2);
+
+    section.appendChild(details);
+
+    const chartDiv = document.createElement("div");
+    section.appendChild(chartDiv);
+    this.#chartArea.appendChild(section);
+
+    const width = this.#container.clientWidth - 40;
+
+    const opts = {
+      width: width > 400 ? width : 400,
+      height: 300,
+      title: "Max Bandwidth (BBR estimate)",
+      cursor: { sync: { key: "pipeline-charts" } },
+      scales: {
+        x: { time: false },
+      },
+      axes: [
+        { label: "elapsed time (ms)" },
+        { label: "Mbit/s" },
+      ],
+      series: [
+        {},
+        {
+          label: "Delivery Rate",
+          stroke: "#f97316",
+          width: 1,
+          dash: [2, 2],
+          points: { show: true, size: 3 },
+        },
+        {
+          label: "Max BW (10-RTT window)",
+          stroke: "#7c3aed",
+          width: 2,
+          points: { show: true, size: 3 },
+        },
+      ],
+    };
+
+    const chart = new uPlot(opts, [timestamps, rawRate, maxRate], chartDiv);
     this.#charts.push(chart);
   }
 
