@@ -53,9 +53,10 @@
     </p>
     <p>
       <strong>RTTVar</strong> &mdash; <code>TCPInfo.RTTVar</code>
-      (<code>tcpi_rttvar</code>) &mdash; is the kernel's estimate of RTT
-      variance, used to compute retransmission timeouts. Low values indicate
-      a stable path; spikes suggest sudden changes in queuing or routing.
+      (<code>tcpi_rttvar</code>) &mdash; is the kernel's smoothed mean
+      deviation of RTT (not a true variance), used to compute retransmission
+      timeouts. Low values indicate a stable path; spikes suggest sudden
+      changes in queuing or routing.
     </p>
     <p>
       <strong>BBR MinRTT</strong> &mdash; <code>BBRInfo.MinRTT</code>
@@ -67,10 +68,10 @@
     </p>
     <p>
       <strong>What to look for:</strong> the gap between RTT (smoothed) and
-      MinRTT is the queuing delay (bufferbloat). A large, persistent gap
-      means buffers along the path are filling up. On well-tuned connections,
-      BBR should keep this gap small. On satellite or high-latency links,
-      the gap may be significant.
+      MinRTT is a lower bound on queuing delay &mdash; MinRTT itself may
+      include standing queues that never drained. A large, persistent gap
+      means buffers along the path are filling up. BBR bounds this gap
+      only loosely (up to ~2.4&times; MinRTT under some conditions).
     </p>
   </details>
   <div id="chart-rtt"></div>
@@ -110,8 +111,11 @@
       to <em>Drain</em> (pacing gain 0.34, draining the queue built during
       startup), then enters <em>ProbeBW</em> where it cycles the pacing gain
       through probe up (1.25), drain (0.75), and cruise (1.0). Every ~10
-      seconds, it enters <em>ProbeRTT</em> (cwnd gain 1.0, cwnd collapses)
-      to refresh its MinRTT estimate.
+      seconds, it enters <em>ProbeRTT</em> (cwnd gain 1.0, cwnd shrinks)
+      to refresh its MinRTT estimate. Note: in ProbeBW the gain cycle
+      advances roughly once per RTT, often much faster than the sampling
+      interval, so sampled gain values are aliased snapshots of the cycle,
+      not its shape.
     </p>
     <table class="legend">
       <thead>
@@ -146,10 +150,11 @@
     <p>
       In a healthy connection, the state stays at <strong>Open</strong> (0).
       Frequent transitions to <strong>Recovery</strong> (3) indicate ongoing
-      packet loss with SACK-based recovery. A transition to
-      <strong>Loss</strong> (4) is more severe: it means a retransmission
-      timeout (RTO) fired, which typically causes a significant throughput
-      drop.
+      packet loss with SACK-based recovery. <strong>Loss</strong> (4) is
+      rare on modern Linux: RACK-TLP (RFC 8985) repairs nearly all loss
+      within Recovery, so reaching Loss suggests a path blackout rather
+      than ordinary congestion. This is a raw gauge &mdash; brief Recovery
+      episodes can fall between samples; cross-check with TotalRetrans.
     </p>
     <table class="legend">
       <thead>
@@ -218,7 +223,10 @@
       something is wrong with our understanding. When RWND is consistently
       lower than CWND and close to the inflight, the receiver is the
       bottleneck. When CWND is the tighter bound, the network (congestion)
-      is the limiting factor.
+      is the limiting factor. On lossy paths, RWND below ~2&times; cwnd
+      degrades performance even when it doesn't appear to be the binding
+      limit, because loss recovery (SACK/PRR) needs sequence space beyond
+      the loss point.
     </p>
   </details>
   <div id="chart-flight"></div>
@@ -239,19 +247,11 @@
     </p>
     <p>
       In a bulk download test like ndt7, the server writes data as fast as
-      it can. When <code>NotsentBytes</code> is high, TCP is the bottleneck
-      &mdash; the application has provided data but TCP cannot send it yet
-      (congestion or flow control limited). When it drops to zero, the
-      application is momentarily not keeping up, or TCP has just drained
-      the buffer after a burst of ACKs.
-    </p>
-    <p>
-      <strong>What to look for:</strong> in a well-functioning download,
-      <code>NotsentBytes</code> oscillates &mdash; filling when the app
-      writes a burst, draining as TCP sends. Persistently high values
-      suggest TCP is severely constrained. Persistently zero would suggest
-      the application is not writing fast enough to keep TCP busy (but this
-      is unlikely in ndt7's bulk sender).
+      it can. High <code>NotsentBytes</code> is the expected state &mdash;
+      it means the app is keeping TCP loaded. Persistently low values are
+      more interesting: the sender cannot fill the socket buffer fast
+      enough, which is a sender-side bottleneck and means the measurement
+      may underestimate the network.
     </p>
   </details>
   <div id="chart-notsent"></div>
@@ -283,23 +283,22 @@
       <strong>RWndLimited</strong> &mdash; <code>TCPInfo.RWndLimited</code>
       (<code>tcpi_rwnd_limited</code>) &mdash; cumulative time TCP could
       not send because the receiver's advertised window (RWND) was the
-      tightest constraint. A large value here means the receiver cannot
-      absorb data fast enough.
+      tightest constraint. A large value means the test measures the
+      client rather than the network &mdash; throughput underestimates the
+      path.
     </p>
     <p>
       <strong>SndBufLimited</strong> &mdash; <code>TCPInfo.SndBufLimited</code>
       (<code>tcpi_sndbuf_limited</code>) &mdash; cumulative time TCP could
-      not send because the local send buffer was full. A large value here
-      means the send buffer is too small for the connection's BDP, and
-      the kernel's autotuning has not (or cannot) grow it further.
+      not send because the local send buffer was full. Treat large values
+      as a hint of send-buffer pressure, not a precise diagnosis &mdash;
+      this counter instruments a narrow internal condition.
     </p>
     <p>
       <strong>What to look for:</strong> ideally, BusyTime matches the
       test duration (app always has data), and RWndLimited and SndBufLimited
       are both near zero (neither endpoint is the bottleneck, so the network
-      is the only limiting factor). When one of the two is significant, it
-      points directly at the bottleneck: receiver too slow, or send buffer
-      too small.
+      is the only limiting factor).
     </p>
   </details>
   <div id="chart-stalls"></div>
@@ -352,7 +351,7 @@
       <strong>Avg Throughput (BytesAcked)</strong> is computed as
       <code>TCPInfo.BytesAcked * 8 / elapsed</code>, where elapsed is
       measured from the first snapshot. This is the cumulative average
-      goodput &mdash; total acknowledged bytes divided by total time. It
+      throughput &mdash; total acknowledged bytes divided by total time. It
       starts low (includes the ramp-up) and converges toward the
       steady-state rate. The final value approximates what ndt7 reports
       as <code>MeanThroughputMbps</code>. Note: this is measured at the
@@ -365,7 +364,7 @@
       rate observed over a recent time window. It represents what BBR
       <em>believes</em> the path can sustain. It is typically higher than
       the average throughput because it captures the peak capacity, not
-      the average including ramp-up and overhead.
+      the average including ramp-up.
     </p>
     <p>
       <strong>Delivery Rate</strong> &mdash; <code>TCPInfo.DeliveryRate
