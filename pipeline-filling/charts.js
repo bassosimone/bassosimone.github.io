@@ -178,8 +178,9 @@ class ChartsView {
       const bt0 = bw[0].timeUs;
       const bElapsed = bw.map(s => (s.timeUs - bt0) / 1000);
       const bRate = bw.map(s => s.rateMbps);
+      const bAvg = this.#computeEWMA(bRate, 1 / 8);
       const bMax = bw.map(s => s.maxMbps);
-      this.#buildMaxBandwidthChart(bElapsed, bRate, bMax);
+      this.#buildMaxBandwidthChart(bElapsed, bRate, bAvg, bMax);
     }
   }
 
@@ -873,7 +874,7 @@ class ChartsView {
     return rates;
   }
 
-  #buildMaxBandwidthChart(timestamps, rawRate, maxRate) {
+  #buildMaxBandwidthChart(timestamps, rawRate, avgRate, maxRate) {
     const section = document.createElement("div");
     section.className = "charts-section";
 
@@ -896,11 +897,18 @@ class ChartsView {
 
     const p2 = document.createElement("p");
     p2.innerHTML =
+      "<strong>Avg Delivery Rate</strong> — exponentially weighted " +
+      "moving average (EWMA, α = 1/8) of the per-ACK delivery rate, " +
+      "showing the smoothed trend.";
+    details.appendChild(p2);
+
+    const p3 = document.createElement("p");
+    p3.innerHTML =
       "<strong>Max BW (10-RTT window)</strong> — the maximum delivery " +
       "rate observed over a sliding window of 10 round-trip times. " +
       "This is BBR's BtlBw estimate: the bottleneck bandwidth of " +
       "the path.";
-    details.appendChild(p2);
+    details.appendChild(p3);
 
     section.appendChild(details);
 
@@ -932,6 +940,12 @@ class ChartsView {
           points: { show: true, size: 3 },
         },
         {
+          label: "Avg Delivery Rate",
+          stroke: "#e63946",
+          width: 2,
+          points: { show: true, size: 3 },
+        },
+        {
           label: "Max BW (10-RTT window)",
           stroke: "#7c3aed",
           width: 2,
@@ -940,7 +954,7 @@ class ChartsView {
       ],
     };
 
-    const chart = new uPlot(opts, [timestamps, rawRate, maxRate], chartDiv);
+    const chart = new uPlot(opts, [timestamps, rawRate, avgRate, maxRate], chartDiv);
     this.#charts.push(chart);
   }
 
