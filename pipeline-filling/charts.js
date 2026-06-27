@@ -144,6 +144,15 @@ class ChartsView {
     const rawRttMs = smoothed.map(s => s.rtt / 1000);
 
     this.#buildRTTChart(elapsedMs, rawRttMs, srttMs, rttvarMs);
+
+    const flight = this.#computeBytesInFlight(tcp, addr);
+    if (flight.length > 0) {
+      const ft0 = flight[0].timeUs;
+      const fElapsed = flight.map(s => (s.timeUs - ft0) / 1000);
+      const fBytes = flight.map(s => s.inFlight / 1024);
+      const fAvg = this.#computeEWMA(fBytes, 1 / 8);
+      this.#buildFlightChart(fElapsed, fBytes, fAvg);
+    }
   }
 
   // Compute RTT samples from a given observer's perspective.
@@ -309,26 +318,163 @@ class ChartsView {
           stroke: "#ca8a04",
           width: 1,
           dash: [2, 2],
-          points: { show: false },
+          points: { show: true, size: 3 },
         },
         {
           label: "Smoothed RTT",
           stroke: "#e63946",
           width: 2,
-          points: { show: false },
+          points: { show: true, size: 3 },
         },
         {
           label: "RTTVar",
           stroke: "#0891b2",
           width: 2,
           dash: [4, 4],
-          points: { show: false },
+          points: { show: true, size: 3 },
         },
       ],
     };
 
     const chart = new uPlot(opts, [timestamps, rawRtt, srtt, rttvar], chartDiv);
     this.#charts.push(chart);
+  }
+
+  // Bytes in flight from the observer's perspective: the amount of
+  // unacknowledged data at each point in time.
+  #computeBytesInFlight(tcpPackets, addr) {
+    // highSeq tracks the highest byte offset sent (relative to ISN).
+    // highAck tracks the highest byte offset acknowledged.
+    let highSeq = 0;
+    let highAck = 0;
+    let isn = 0;
+    let initialized = false;
+    const result = [];
+
+    for (const p of tcpPackets) {
+      const t = p.detail.tcp;
+
+      if (p.event === "entered" && p.src === addr) {
+        const effectiveLen = t.payload_length > 0
+          ? t.payload_length
+          : (t.flag_syn || t.flag_fin ? 1 : 0);
+        if (effectiveLen === 0) continue;
+
+        if (!initialized) {
+          isn = t.seq;
+          initialized = true;
+        }
+        const seqEnd = t.seq + effectiveLen - isn;
+        if (seqEnd > highSeq) {
+          highSeq = seqEnd;
+          result.push({
+            timeUs: this.#parseTimeMicros(p.time),
+            inFlight: Math.max(0, highSeq - highAck),
+          });
+        }
+        continue;
+      }
+
+      if (p.event === "delivered" && p.dst === addr && t.flag_ack) {
+        if (!initialized) continue;
+        const acked = t.ack - isn;
+        if (acked > highAck) {
+          highAck = acked;
+          result.push({
+            timeUs: this.#parseTimeMicros(p.time),
+            inFlight: Math.max(0, highSeq - highAck),
+          });
+        }
+      }
+    }
+
+    return result;
+  }
+
+  #buildFlightChart(timestamps, inFlight, avgFlight) {
+    const section = document.createElement("div");
+    section.className = "charts-section";
+
+    const heading = document.createElement("h3");
+    heading.textContent = "Bytes in Flight";
+    section.appendChild(heading);
+
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "About this chart";
+    details.appendChild(summary);
+
+    const p1 = document.createElement("p");
+    p1.innerHTML =
+      "<strong>In Flight (raw)</strong> — the amount of data sent but not " +
+      "yet acknowledged, computed as the difference between the highest " +
+      "sequence number sent and the highest ACK received.";
+    details.appendChild(p1);
+
+    const p2 = document.createElement("p");
+    p2.innerHTML =
+      "<strong>Avg in Flight</strong> — exponentially weighted moving " +
+      "average (EWMA, α = 1/8) of the raw in-flight values, smoothing " +
+      "out per-packet fluctuations to show the overall trend.";
+    details.appendChild(p2);
+
+    const p3 = document.createElement("p");
+    p3.innerHTML =
+      "This is the metric that shows the pipe filling: during slow start " +
+      "it ramps up exponentially, then stabilizes once the congestion " +
+      "window or the network capacity is reached.";
+    details.appendChild(p3);
+
+    section.appendChild(details);
+
+    const chartDiv = document.createElement("div");
+    section.appendChild(chartDiv);
+    this.#chartArea.appendChild(section);
+
+    const width = this.#container.clientWidth - 40;
+
+    const opts = {
+      width: width > 400 ? width : 400,
+      height: 300,
+      title: "Bytes in Flight",
+      cursor: { sync: { key: "pipeline-charts" } },
+      scales: {
+        x: { time: false },
+      },
+      axes: [
+        { label: "elapsed (ms)" },
+        { label: "KB" },
+      ],
+      series: [
+        {},
+        {
+          label: "In Flight (raw)",
+          stroke: "#f97316",
+          width: 1,
+          dash: [2, 2],
+          points: { show: true, size: 3 },
+        },
+        {
+          label: "Avg in Flight",
+          stroke: "#7c3aed",
+          width: 2,
+          fill: "rgba(124, 58, 237, 0.08)",
+          points: { show: true, size: 3 },
+        },
+      ],
+    };
+
+    const chart = new uPlot(opts, [timestamps, inFlight, avgFlight], chartDiv);
+    this.#charts.push(chart);
+  }
+
+  #computeEWMA(values, alpha) {
+    if (values.length === 0) return [];
+    const result = [values[0]];
+    for (let i = 1; i < values.length; i++) {
+      result.push((1 - alpha) * result[i - 1] + alpha * values[i]);
+    }
+    return result;
   }
 
   #showEmpty(msg) {
