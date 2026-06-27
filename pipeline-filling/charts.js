@@ -163,13 +163,14 @@ class ChartsView {
       this.#buildCumulativeChart(cElapsed, cSent, cRecv);
     }
 
-    const speed = this.#computeSpeed(tcp, addr);
+    const speed = this.#computeSpeed(tcp, addr, samples);
     if (speed.length > 0) {
       const st0 = speed[0].timeUs;
       const sElapsed = speed.map(s => (s.timeUs - st0) / 1000);
       const sSend = speed.map(s => s.sendMbps);
       const sRecv = speed.map(s => s.recvMbps);
-      this.#buildSpeedChart(sElapsed, sSend, sRecv);
+      const sWindow = speed.map(s => s.windowMbps);
+      this.#buildSpeedChart(sElapsed, sSend, sRecv, sWindow);
     }
 
     const bw = this.#computeMaxBandwidth(tcp, addr, samples);
@@ -601,7 +602,14 @@ class ChartsView {
   // Speed from the observer's perspective:
   // - Send: BytesAcked / elapsed (cumulative ACKed bytes / time)
   // - Receive: BytesReceived / elapsed (cumulative payload received / time)
-  #computeSpeed(tcpPackets, addr) {
+  // - Window: BytesAcked over a sliding 10-RTT window
+  #computeSpeed(tcpPackets, addr, rttSamples) {
+    const sortedRtts = rttSamples.map(s => s.rttUs).sort((a, b) => a - b);
+    const medianRttUs = sortedRtts.length > 0
+      ? sortedRtts[Math.floor(sortedRtts.length / 2)]
+      : 25000;
+    const windowUs = medianRttUs * 10;
+
     let sendIsn = 0;
     let highAck = 0;
     let bytesRecv = 0;
@@ -609,6 +617,9 @@ class ChartsView {
     let sendInit = false;
     let t0Init = false;
     const result = [];
+
+    // Collect ACK snapshots for sliding window lookback.
+    const ackSnapshots = [];
 
     for (const p of tcpPackets) {
       if (p.event !== "delivered" || p.dst !== addr) continue;
@@ -630,6 +641,7 @@ class ChartsView {
         } else if (t.ack > highAck) {
           highAck = t.ack;
           changed = true;
+          ackSnapshots.push({ timeUs: timeUs, cumAcked: highAck - sendIsn });
         }
       }
 
@@ -639,10 +651,27 @@ class ChartsView {
       }
 
       if (changed && elapsedUs > 0) {
+        // Sliding window: find the oldest snapshot within the window.
+        let windowMbps = 0;
+        if (sendInit && ackSnapshots.length > 0) {
+          const cumNow = highAck - sendIsn;
+          let oldest = ackSnapshots[ackSnapshots.length - 1];
+          for (let j = ackSnapshots.length - 1; j >= 0; j--) {
+            if (timeUs - ackSnapshots[j].timeUs > windowUs) break;
+            oldest = ackSnapshots[j];
+          }
+          const wDt = timeUs - oldest.timeUs;
+          const wBytes = cumNow - oldest.cumAcked;
+          if (wDt > 0 && wBytes > 0) {
+            windowMbps = (wBytes * 8) / wDt;
+          }
+        }
+
         result.push({
           timeUs: timeUs,
           sendMbps: sendInit ? ((highAck - sendIsn) * 8) / elapsedUs : 0,
           recvMbps: (bytesRecv * 8) / elapsedUs,
+          windowMbps: windowMbps,
         });
       }
     }
@@ -650,7 +679,7 @@ class ChartsView {
     return result;
   }
 
-  #buildSpeedChart(timestamps, sendMbps, recvMbps) {
+  #buildSpeedChart(timestamps, sendMbps, recvMbps, windowMbps) {
     const section = document.createElement("div");
     section.className = "charts-section";
 
@@ -666,24 +695,31 @@ class ChartsView {
     const p1 = document.createElement("p");
     p1.innerHTML =
       "<strong>BytesAcked / elapsed</strong> — cumulative bytes " +
-      "acknowledged divided by elapsed time, measured at each ACK " +
-      "that advances the acknowledgement sequence. This is the " +
-      "send-direction goodput.";
+      "acknowledged divided by total elapsed time. This is the " +
+      "send-direction goodput averaged over the entire connection.";
     details.appendChild(p1);
 
     const p2 = document.createElement("p");
     p2.innerHTML =
       "<strong>BytesReceived / elapsed</strong> — cumulative payload " +
-      "bytes received divided by elapsed time, measured at each " +
-      "incoming data packet. This is the receive-direction goodput.";
+      "bytes received divided by total elapsed time. This is the " +
+      "receive-direction goodput averaged over the entire connection.";
     details.appendChild(p2);
 
     const p3 = document.createElement("p");
     p3.innerHTML =
+      "<strong>BytesAcked / recent</strong> — bytes acknowledged " +
+      "over a sliding window of 10 round-trip times. Unlike the " +
+      "cumulative average, this reflects the current sending rate " +
+      "and converges to the bottleneck bandwidth once the pipe is full.";
+    details.appendChild(p3);
+
+    const p4 = document.createElement("p");
+    p4.innerHTML =
       "These are the same metrics shown in kernel-level tcp_info " +
       "data (e.g., in the ndt7 tcp-info visualizer), but derived " +
       "here from packet observations alone.";
-    details.appendChild(p3);
+    details.appendChild(p4);
 
     section.appendChild(details);
 
@@ -719,10 +755,17 @@ class ChartsView {
           width: 2,
           points: { show: true, size: 3 },
         },
+        {
+          label: "BytesAcked / recent",
+          stroke: "#16a34a",
+          width: 2,
+          dash: [4, 4],
+          points: { show: true, size: 3 },
+        },
       ],
     };
 
-    const chart = new uPlot(opts, [timestamps, sendMbps, recvMbps], chartDiv);
+    const chart = new uPlot(opts, [timestamps, sendMbps, recvMbps, windowMbps], chartDiv);
     this.#charts.push(chart);
   }
 
