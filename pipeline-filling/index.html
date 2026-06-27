@@ -183,6 +183,17 @@
       packet to see its decoded headers (IP, TCP, UDP, HTTP, TLS, DNS).
     </p>
 
+    <h3>Charts tab</h3>
+    <p>
+      Derived TCP statistics plotted over time, computed from the
+      packet trace. Includes round-trip time (raw, smoothed, RTTVar
+      per RFC 6298), bytes in flight, cumulative bytes transferred,
+      speed (BytesAcked / elapsed and BytesAcked / recent), and a
+      BBR-style max bandwidth estimate based on per-ACK delivery
+      rates. Use the perspective buttons to switch between the
+      server and client points of view.
+    </p>
+
     <h3>Source</h3>
     <p>
       Extracted from the
