@@ -153,6 +153,15 @@ class ChartsView {
       const fAvg = this.#computeEWMA(fBytes, 1 / 8);
       this.#buildFlightChart(fElapsed, fBytes, fAvg);
     }
+
+    const cumul = this.#computeCumulativeBytes(tcp, addr);
+    if (cumul.length > 0) {
+      const ct0 = cumul[0].timeUs;
+      const cElapsed = cumul.map(s => (s.timeUs - ct0) / 1000);
+      const cSent = cumul.map(s => s.sent / 1024);
+      const cRecv = cumul.map(s => s.received / 1024);
+      this.#buildCumulativeChart(cElapsed, cSent, cRecv);
+    }
   }
 
   // Compute RTT samples from a given observer's perspective.
@@ -308,7 +317,7 @@ class ChartsView {
         x: { time: false },
       },
       axes: [
-        { label: "elapsed (ms)" },
+        { label: "elapsed time (ms)" },
         { label: "delay (ms)" },
       ],
       series: [
@@ -442,7 +451,7 @@ class ChartsView {
         x: { time: false },
       },
       axes: [
-        { label: "elapsed (ms)" },
+        { label: "elapsed time (ms)" },
         { label: "KB" },
       ],
       series: [
@@ -465,6 +474,109 @@ class ChartsView {
     };
 
     const chart = new uPlot(opts, [timestamps, inFlight, avgFlight], chartDiv);
+    this.#charts.push(chart);
+  }
+
+  #computeCumulativeBytes(tcpPackets, addr) {
+    let sent = 0;
+    let received = 0;
+    const result = [];
+
+    for (const p of tcpPackets) {
+      const t = p.detail.tcp;
+      if (t.payload_length === 0) continue;
+
+      if (p.event === "entered" && p.src === addr) {
+        sent += t.payload_length;
+        result.push({
+          timeUs: this.#parseTimeMicros(p.time),
+          sent: sent,
+          received: received,
+        });
+      } else if (p.event === "delivered" && p.dst === addr) {
+        received += t.payload_length;
+        result.push({
+          timeUs: this.#parseTimeMicros(p.time),
+          sent: sent,
+          received: received,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  #buildCumulativeChart(timestamps, sent, received) {
+    const section = document.createElement("div");
+    section.className = "charts-section";
+
+    const heading = document.createElement("h3");
+    heading.textContent = "Cumulative Bytes";
+    section.appendChild(heading);
+
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "About this chart";
+    details.appendChild(summary);
+
+    const p1 = document.createElement("p");
+    p1.innerHTML =
+      "<strong>Sent</strong> — cumulative payload bytes transmitted " +
+      "by the observer, counted at the time each data segment enters " +
+      "the network.";
+    details.appendChild(p1);
+
+    const p2 = document.createElement("p");
+    p2.innerHTML =
+      "<strong>Received</strong> — cumulative payload bytes delivered " +
+      "to the observer from the remote peer.";
+    details.appendChild(p2);
+
+    const p3 = document.createElement("p");
+    p3.innerHTML =
+      "The gap between the two curves reflects the asymmetry of the " +
+      "connection: a bulk download shows a steep Received curve and a " +
+      "flat Sent curve, while a bulk upload shows the opposite.";
+    details.appendChild(p3);
+
+    section.appendChild(details);
+
+    const chartDiv = document.createElement("div");
+    section.appendChild(chartDiv);
+    this.#chartArea.appendChild(section);
+
+    const width = this.#container.clientWidth - 40;
+
+    const opts = {
+      width: width > 400 ? width : 400,
+      height: 300,
+      title: "Cumulative Bytes",
+      cursor: { sync: { key: "pipeline-charts" } },
+      scales: {
+        x: { time: false },
+      },
+      axes: [
+        { label: "elapsed time (ms)" },
+        { label: "KB" },
+      ],
+      series: [
+        {},
+        {
+          label: "Sent",
+          stroke: "#e63946",
+          width: 2,
+          points: { show: true, size: 3 },
+        },
+        {
+          label: "Received",
+          stroke: "#2563eb",
+          width: 2,
+          points: { show: true, size: 3 },
+        },
+      ],
+    };
+
+    const chart = new uPlot(opts, [timestamps, sent, received], chartDiv);
     this.#charts.push(chart);
   }
 
