@@ -58,6 +58,13 @@
 
 .charts-section {
   margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #ddd;
+}
+
+.charts-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .charts-section h3 {

@@ -162,6 +162,15 @@ class ChartsView {
       const cRecv = cumul.map(s => s.received / 1024);
       this.#buildCumulativeChart(cElapsed, cSent, cRecv);
     }
+
+    const speed = this.#computeSpeed(tcp, addr);
+    if (speed.length > 0) {
+      const st0 = speed[0].timeUs;
+      const sElapsed = speed.map(s => (s.timeUs - st0) / 1000);
+      const sSend = speed.map(s => s.sendMbps);
+      const sRecv = speed.map(s => s.recvMbps);
+      this.#buildSpeedChart(sElapsed, sSend, sRecv);
+    }
   }
 
   // Compute RTT samples from a given observer's perspective.
@@ -577,6 +586,134 @@ class ChartsView {
     };
 
     const chart = new uPlot(opts, [timestamps, sent, received], chartDiv);
+    this.#charts.push(chart);
+  }
+
+  // Speed from the observer's perspective:
+  // - Send: BytesAcked / elapsed (cumulative ACKed bytes / time)
+  // - Receive: BytesReceived / elapsed (cumulative payload received / time)
+  #computeSpeed(tcpPackets, addr) {
+    let sendIsn = 0;
+    let highAck = 0;
+    let bytesRecv = 0;
+    let t0 = 0;
+    let sendInit = false;
+    let t0Init = false;
+    const result = [];
+
+    for (const p of tcpPackets) {
+      if (p.event !== "delivered" || p.dst !== addr) continue;
+      const t = p.detail.tcp;
+      const timeUs = this.#parseTimeMicros(p.time);
+
+      if (!t0Init) {
+        t0 = timeUs;
+        t0Init = true;
+      }
+
+      const elapsedUs = timeUs - t0;
+      let changed = false;
+
+      if (t.flag_ack) {
+        if (!sendInit) {
+          sendIsn = t.ack;
+          sendInit = true;
+        } else if (t.ack > highAck) {
+          highAck = t.ack;
+          changed = true;
+        }
+      }
+
+      if (t.payload_length > 0) {
+        bytesRecv += t.payload_length;
+        changed = true;
+      }
+
+      if (changed && elapsedUs > 0) {
+        result.push({
+          timeUs: timeUs,
+          sendMbps: sendInit ? ((highAck - sendIsn) * 8) / elapsedUs : 0,
+          recvMbps: (bytesRecv * 8) / elapsedUs,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  #buildSpeedChart(timestamps, sendMbps, recvMbps) {
+    const section = document.createElement("div");
+    section.className = "charts-section";
+
+    const heading = document.createElement("h3");
+    heading.textContent = "Speed";
+    section.appendChild(heading);
+
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "About this chart";
+    details.appendChild(summary);
+
+    const p1 = document.createElement("p");
+    p1.innerHTML =
+      "<strong>BytesAcked / elapsed</strong> — cumulative bytes " +
+      "acknowledged divided by elapsed time, measured at each ACK " +
+      "that advances the acknowledgement sequence. This is the " +
+      "send-direction goodput.";
+    details.appendChild(p1);
+
+    const p2 = document.createElement("p");
+    p2.innerHTML =
+      "<strong>BytesReceived / elapsed</strong> — cumulative payload " +
+      "bytes received divided by elapsed time, measured at each " +
+      "incoming data packet. This is the receive-direction goodput.";
+    details.appendChild(p2);
+
+    const p3 = document.createElement("p");
+    p3.innerHTML =
+      "These are the same metrics shown in kernel-level tcp_info " +
+      "data (e.g., in the ndt7 tcp-info visualizer), but derived " +
+      "here from packet observations alone.";
+    details.appendChild(p3);
+
+    section.appendChild(details);
+
+    const chartDiv = document.createElement("div");
+    section.appendChild(chartDiv);
+    this.#chartArea.appendChild(section);
+
+    const width = this.#container.clientWidth - 40;
+
+    const opts = {
+      width: width > 400 ? width : 400,
+      height: 300,
+      title: "Speed",
+      cursor: { sync: { key: "pipeline-charts" } },
+      scales: {
+        x: { time: false },
+      },
+      axes: [
+        { label: "elapsed time (ms)" },
+        { label: "Mbit/s" },
+      ],
+      series: [
+        {},
+        {
+          label: "BytesAcked / elapsed",
+          stroke: "#e63946",
+          width: 2,
+          points: { show: true, size: 3 },
+        },
+        {
+          label: "BytesReceived / elapsed",
+          stroke: "#2563eb",
+          width: 2,
+          points: { show: true, size: 3 },
+        },
+      ],
+    };
+
+    const chart = new uPlot(opts, [timestamps, sendMbps, recvMbps], chartDiv);
     this.#charts.push(chart);
   }
 
