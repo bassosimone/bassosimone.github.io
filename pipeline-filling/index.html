@@ -6,8 +6,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TCP Pipeline Filling</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
 <link rel="stylesheet" href="topology.css">
 <link rel="stylesheet" href="packets.css">
+<link rel="stylesheet" href="charts.css">
 
 <style>
   body {
@@ -115,6 +117,10 @@
     width: 95vw;
     height: calc(100vh - 140px);
   }
+  #tab-charts .charts-widget {
+    width: 95vw;
+    height: calc(100vh - 140px);
+  }
 </style>
 
 </head>
@@ -128,6 +134,7 @@
   <button class="active" data-tab="about">About</button>
   <button data-tab="network">Network</button>
   <button data-tab="packets">Packets</button>
+  <button data-tab="charts">Charts</button>
 </div>
 
 <div id="tab-about" class="tab-content visible">
@@ -194,8 +201,14 @@
   <div id="widget-packets"></div>
 </div>
 
+<div id="tab-charts" class="tab-content">
+  <div id="widget-charts"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
 <script src="topology.js"></script>
 <script src="packets.js"></script>
+<script src="charts.js"></script>
 
 <script>
 "use strict";
@@ -203,6 +216,7 @@
 // Create widgets (they don't auto-load).
 const topology = new TopologyMap(document.getElementById("widget-topology"));
 const packets = new PacketViewer(document.getElementById("widget-packets"));
+const charts = new ChartsView(document.getElementById("widget-charts"));
 
 // Tab switching.
 const tabButtons = document.querySelectorAll("#tabs button");
@@ -223,6 +237,7 @@ for (const btn of tabButtons) {
 // Load trace.
 topology.loadTrace("traces/default.json");
 packets.loadTrace("traces/default.json");
+charts.loadTrace("traces/default.json");
 </script>
 
 </body>

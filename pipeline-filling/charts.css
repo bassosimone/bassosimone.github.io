@@ -1,0 +1,91 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+.charts-widget {
+  background: #fff;
+  border-radius: 6px;
+  padding: 15px 20px;
+  font-family: 'Ubuntu Mono', 'Courier New', monospace;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* Controls bar */
+
+.charts-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.charts-controls button {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 6px 12px;
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  background: #f0f0f0;
+  cursor: pointer;
+}
+
+.charts-controls button:hover {
+  background: #ddd;
+}
+
+.charts-controls button.active {
+  background: #2a7ae2;
+  color: #fff;
+  border-color: #2a7ae2;
+}
+
+.charts-separator {
+  width: 1px;
+  height: 24px;
+  background: #ccc;
+  margin: 0 4px;
+}
+
+.charts-status {
+  font-size: 13px;
+  color: #555;
+  margin-left: auto;
+}
+
+/* Chart sections */
+
+.charts-section {
+  margin-bottom: 20px;
+}
+
+.charts-section h3 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  color: #333;
+}
+
+.charts-section details {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #555;
+  line-height: 1.5;
+}
+
+.charts-section details summary {
+  cursor: pointer;
+  color: #2a7ae2;
+  font-size: 13px;
+}
+
+.charts-section details p {
+  margin: 6px 0;
+}
+
+.charts-empty {
+  color: #999;
+  text-align: center;
+  padding: 40px 0;
+  font-size: 14px;
+}
