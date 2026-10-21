@@ -265,7 +265,7 @@
     applyFilters();
   }
 
-  fetch("manifest.json")
+  fetch("https://storage.googleapis.com/mlab-sandbox-iqb-us-central1/manifest/v0/manifest.json")
     .then(function (r) {
       if (!r.ok) throw new Error(r.status);
       return r.json();
